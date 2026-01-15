@@ -13,9 +13,11 @@ import {
 import { createRequestLogger, getRequestId } from "../../utils/logger";
 import { sseHub } from "../../lib/sseHub";
 import { processActivityImageMessage } from "../../services/activity/processActivityImageMessage.js";
+import { buildQuickReplyMenu } from "../../line/quickReply";
 
 const router = Router();
 const TENANT_DEFAULT = process.env.TENANT_DEFAULT || "bn9";
+const APP_BASE_URL = process.env.APP_BASE_URL ?? "";
 
 /**
  * ถ้า CaseItem.kind เป็น enum ใน Prisma:
@@ -238,10 +240,14 @@ async function resolveBot(tenant: string, botIdParam?: string) {
 /* LINE reply helper                                                  */
 /* ------------------------------------------------------------------ */
 
+type LineSendMessage =
+  | { type: "text"; text: string; quickReply?: any }
+  | Record<string, any>;
+
 async function lineReply(
   replyToken: string,
   channelAccessToken: string,
-  text: string
+  messages: LineSendMessage[]
 ): Promise<boolean> {
   const resp = await fetch("https://api.line.me/v2/bot/message/reply", {
     method: "POST",
@@ -251,7 +257,7 @@ async function lineReply(
     },
     body: JSON.stringify({
       replyToken,
-      messages: [{ type: "text", text }],
+      messages,
     }),
   });
 
@@ -461,8 +467,45 @@ router.post("/", async (req: Request, res: Response) => {
     const isRetry = Boolean(req.headers["x-line-retry-key"]);
     const platform: SupportedPlatform = "line";
     const results: Array<Record<string, unknown>> = [];
+    
 
     for (const ev of events) {
+      // -------------------- POSTBACK (Quick Reply / Rich Menu) --------------------
+if (ev.type === "postback") {
+  const replyToken = ev.replyToken;
+  if (!replyToken) {
+    results.push({ skipped: true, reason: "postback_no_replyToken" });
+    continue;
+  }
+
+  const rawData = String((ev as any).postback?.data ?? "");
+  const qs = new URLSearchParams(rawData);
+
+  const c = qs.get("case"); // case=deposit | withdraw | kyc
+
+  if (c === "deposit" || c === "withdraw" || c === "kyc") {
+    const text =
+      c === "deposit"
+        ? "ฝากไม่เข้า: ขอ USER / เบอร์ / ชื่อ / ธนาคาร / เลขบัญชี / เวลา / แนบสลิป"
+        : c === "withdraw"
+        ? "ถอนไม่ได้: ขอ USER / เบอร์ / ธนาคาร / เลขบัญชี / แนบสลิป"
+        : "ยืนยันตัวตน: ขอชื่อ-นามสกุล / เบอร์ / รูปบัตร / รูปคู่บัตร";
+
+    const quickReply = buildQuickReplyMenu("th", APP_BASE_URL);
+
+    const sent = await lineReply(replyToken, channelAccessToken, [
+      { type: "text", text, quickReply },
+    ]).catch(() => false);
+
+    results.push({ ok: true, kind: "postback_case", case: c, replied: sent });
+    continue;
+  }
+
+  results.push({ ok: true, kind: "postback_other", data: rawData });
+  continue;
+}
+// ---------------------------------------------------------------------------
+
       try {
         if (ev.type !== "message" || !ev.message) {
           results.push({ skipped: true, reason: "not_message" });
@@ -873,11 +916,9 @@ router.post("/", async (req: Request, res: Response) => {
         // ตอบ LINE (ยกเว้น retry)
         let replySent = false;
         if (!isRetry && ev.replyToken && channelAccessToken && finalReply) {
-          replySent = await lineReply(
-            ev.replyToken,
-            channelAccessToken,
-            finalReply
-          ).catch(() => false);
+          replySent = await lineReply(ev.replyToken, channelAccessToken, [
+  { type: "text", text: finalReply },
+]).catch(() => false);
         }
 
         results.push({ ok: true, replied: replySent, intent, isIssue });
