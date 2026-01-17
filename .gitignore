@@ -1,35 +1,25 @@
-# --- env / secrets ---
-.env
-.env.*
+# env
+**/.env
+**/.env.*
 !.env.example
 
-# --- dependencies ---
-node_modules/
+# node_modules
+**/node_modules/
 
-# --- build outputs ---
-dist/
-build/
-.next/
-.vite/
+# build outputs (match nested folders)
+**/dist/
+**/build/
+**/.next/
+**/.vite/
 
-# --- local db ---
-*.db
-*.sqlite
-*.sqlite3
-dev.db
+# db/local
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+**/dev.db
 
-# --- uploads / generated ---
-uploads/
-
-# --- archives / backups ---
-*.tar.gz
+# archives / backups
 *.bak
 *.bak.*
-
-# --- BN88 local tools ---
-cloudflared*.exe
-
-# --- local archive folder ---
-_ARCHIVE/
-line-engagement-platform/LEP-RUN.ps1
+**/*.tar.gz
 
