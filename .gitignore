@@ -31,4 +31,5 @@ cloudflared*.exe
 
 # --- local archive folder ---
 _ARCHIVE/
+line-engagement-platform/LEP-RUN.ps1
 
