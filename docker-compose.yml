@@ -42,6 +42,12 @@ services:
   # Redis (ใช้ร่วมกัน)
   # -----------------------------
   redis:
+  services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
     image: redis:7-alpine
     ports:
       - "6379:6379"
@@ -52,7 +58,6 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
-
   # -----------------------------
   # Core Backend
   # -----------------------------
