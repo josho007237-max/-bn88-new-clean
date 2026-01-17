@@ -22,4 +22,5 @@
 *.bak
 *.bak.*
 **/*.tar.gz
+line-engagement-platform/LEP-RUN.ps1
 
