@@ -95,6 +95,11 @@ jobs:
     defaults:
       run:
         working-directory: bn88-backend-v12
+
+    # ✅ ใส่ env ระดับ JOB กันพลาด/กันโดนทับ
+    env:
+      DATABASE_URL: "file:./dev.db"
+
     services:
       postgres:
         image: postgres:15
@@ -122,8 +127,6 @@ jobs:
         run: npm ci
 
       - name: Prisma validate
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
         run: npx prisma validate
 
   integration:
@@ -174,3 +177,4 @@ jobs:
         with:
           name: integration-logs
           path: integration-test.log
+
