@@ -169,7 +169,7 @@ jobs:
 
       - name: Run integration tests
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          DATABASE_URL: "file:./dev.db"
         run: npm run test:integration --if-present | tee ../integration-test.log
 
       - name: Upload integration logs
@@ -177,4 +177,3 @@ jobs:
         with:
           name: integration-logs
           path: integration-test.log
-
