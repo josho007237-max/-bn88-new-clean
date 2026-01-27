@@ -24,3 +24,4 @@
 **/*.tar.gz
 line-engagement-platform/LEP-RUN.ps1
 
+tools/
