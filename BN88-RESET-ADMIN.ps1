@@ -4,6 +4,11 @@
 
 param(
   [string]$Root = $PSScriptRoot,
+  [string]$RepoPath = $(if (Test-Path "C:\BN88\BN88-new-clean") { "C:\BN88\BN88-new-clean" } else { $PSScriptRoot }),
+  [switch]$FixGit = $true,
+  [switch]$UseSshWhenNoGcm = $true,
+  [string]$HttpRemote = "https://github.com/josho007237-max/-bn88-new-clean.git",
+  [string]$SshRemote = "git@github.com:josho007237-max/-bn88-new-clean.git",
   [string]$Tenant = "bn9",
   [string]$Email = "root@bn9.local",
   [string]$AdminPassword = $env:BN88_ADMIN_PASSWORD
@@ -15,6 +20,77 @@ function Write-Step($t) { Write-Host "`n==== $t ====" -ForegroundColor Cyan }
 function Write-Ok($t)   { Write-Host "[OK] $t" -ForegroundColor Green }
 function Write-Warn($t) { Write-Host "[WARN] $t" -ForegroundColor Yellow }
 function Write-Bad($t)  { Write-Host "[FAIL] $t" -ForegroundColor Red }
+
+function Test-GitHelperPresent {
+  $cmds = @("git-credential-manager", "git-credential-manager-core")
+  foreach ($c in $cmds) {
+    if (Get-Command $c -ErrorAction SilentlyContinue) { return $true }
+  }
+  return $false
+}
+
+function Reset-GitCredentials {
+  $payload = "protocol=https`nhost=github.com`n`n"
+  try {
+    $payload | git credential reject 2>$null | Out-Null
+  } catch {
+    Write-Warn ("git credential reject failed: {0}" -f $_.Exception.Message)
+  }
+  try {
+    $list = cmdkey /list 2>$null
+    $targets = @()
+    foreach ($line in ($list -split "`r?`n")) {
+      if ($line -match '^Target:\s+(.+)$') {
+        $t = $Matches[1].Trim()
+        if ($t -match 'github\.com') { $targets += $t }
+      }
+    }
+    if ($targets.Count -eq 0) {
+      Write-Warn "cmdkey: no github.com entries found"
+    } else {
+      foreach ($t in $targets) {
+        try {
+          cmdkey /delete:$t 2>$null | Out-Null
+          Write-Ok "cmdkey deleted: $t"
+        } catch {
+          Write-Warn ("cmdkey delete failed: {0}" -f $t)
+        }
+      }
+    }
+  } catch {
+    Write-Warn ("cmdkey list failed: {0}" -f $_.Exception.Message)
+  }
+  try { cmdkey /delete:"LegacyGeneric:target=gh:github.com" 2>$null | Out-Null } catch {}
+  try { cmdkey /delete:"LegacyGeneric:target=gh:github.com:josho007237-max" 2>$null | Out-Null } catch {}
+  try { cmdkey /delete:"LegacyGeneric:target=GitHub - https://api.github.com/josho007237-max" 2>$null | Out-Null } catch {}
+  try {
+    $verify = cmdkey /list 2>$null | findstr /i github
+    if ($verify) { Write-Warn "cmdkey verify: github entries still present" }
+    else { Write-Ok "cmdkey verify: github entries cleared" }
+  } catch {
+    Write-Warn ("cmdkey verify failed: {0}" -f $_.Exception.Message)
+  }
+}
+
+function Fix-GitCredentialHelper {
+  foreach ($scope in @("local","global")) {
+    try { git config --$scope --unset-all credential.helper 2>$null } catch {}
+  }
+  try { git config --system --unset-all credential.helper 2>$null } catch {}
+  git config --global credential.helper manager
+  git config --local credential.helper manager
+}
+
+function Ensure-OriginRemote([string]$DesiredUrl) {
+  $current = git remote get-url origin 2>$null
+  if (-not $current) {
+    git remote add origin $DesiredUrl
+    return
+  }
+  if ($current -ne $DesiredUrl) {
+    git remote set-url origin $DesiredUrl
+  }
+}
 
 function Test-Port([int]$Port) {
   try {
@@ -64,6 +140,35 @@ function Try-Extract-PasswordFromSeed([string]$SeedPath) {
   if ($m2.Success) { return $m2.Groups[2].Value }
 
   return $null
+}
+
+if ($FixGit) {
+  Write-Step "0) Fix Git config + credentials"
+  if (-not (Test-Path $RepoPath)) { throw "Repo path not found: $RepoPath" }
+  Push-Location $RepoPath
+  try {
+    if (-not (Test-Path (Join-Path $RepoPath ".git"))) { throw "Not a git repo: $RepoPath" }
+    Write-Host "RepoPath : $RepoPath"
+
+    Ensure-OriginRemote $HttpRemote
+    Write-Ok "origin => $HttpRemote (http)"
+
+    Fix-GitCredentialHelper
+    Write-Ok "credential.helper => manager (local+global), cleared local/global/system"
+
+    Reset-GitCredentials
+    Write-Ok "cleared github.com credentials (git credential reject + cmdkey)"
+
+    if ($UseSshWhenNoGcm -and -not (Test-GitHelperPresent)) {
+      $cur = git remote get-url origin 2>$null
+      if ($cur -ne $SshRemote) { git remote set-url origin $SshRemote }
+      Write-Warn "GCM not found -> switched origin to SSH for push"
+    }
+    git status | Out-Host
+    git remote -v | Out-Host
+  } finally {
+    Pop-Location
+  }
 }
 
 Write-Step "1) Resolve paths"
