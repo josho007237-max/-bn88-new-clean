@@ -21,6 +21,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import compression from "compression";
 import { ZodError } from "zod";
+import cookieParser from "cookie-parser";
 
 import { config } from "./config";
 import { logger } from "./mw/logger";
@@ -68,6 +69,22 @@ import adminUploadsRouter from "./routes/admin/uploads";
 const app = express();
 app.set("trust proxy", 1);
 
+const webhookBaseUrl = (process.env.WEBHOOK_BASE_URL || "").trim();
+if (webhookBaseUrl) {
+  const lower = webhookBaseUrl.toLowerCase();
+  const isHttp = lower.startsWith("http://");
+  const isLocal =
+    lower.includes("localhost") ||
+    lower.includes("127.0.0.1") ||
+    lower.includes("0.0.0.0");
+  if (isHttp || isLocal) {
+    console.warn(
+      `[WARN] LINE webhook requires HTTPS. WEBHOOK_BASE_URL=${webhookBaseUrl} is not public HTTPS. ` +
+        "Use a tunnel (cloudflared tunnel --url http://localhost:3000)."
+    );
+  }
+}
+
 /* Workers */
 startCampaignScheduleWorker();
 startMessageWorker();
@@ -85,11 +102,30 @@ app.use("/api/uploads", express.static(path.join(process.cwd(), "uploads")));
  * ✅ LINE ต้องใช้ raw body เพื่อ verify signature
  * ต้องอยู่ก่อน express.json()
  */
-app.use("/api/webhooks/line", express.raw({ type: "application/json" }));
+app.use(
+  "/api/webhooks/line",
+  express.raw({
+    type: "application/json",
+    verify: (req, _res, buf) => {
+      (req as any).rawBody = buf;
+    },
+  })
+);
 
-/* parsers ทั่วไป */
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: false, limit: "200kb" }));
+/* parsers ทั่วไป (ยกเว้น LINE webhook เพื่อคง raw body ไว้) */
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/webhooks/line")) return next();
+  return express.json({ limit: "1mb" })(req, res, next);
+});
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/webhooks/line")) return next();
+  return express.urlencoded({ extended: false, limit: "200kb" })(
+    req,
+    res,
+    next
+  );
+});
+app.use(cookieParser());
 
 app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
   if (err?.type === "entity.too.large") {
@@ -180,7 +216,7 @@ app.use("/api/stats", statsRoutes);
 app.use("/api/ai/answer", aiAnswerRoute);
 
 /* Realtime */
-app.get("/api/live/:tenant", sseHandler);
+app.get("/api/live/:tenant", authGuard, sseHandler);
 app.get("/api/live/metrics", metricsSseHandler);
 app.get("/metrics/stream", metricsStreamHandler);
 
@@ -238,10 +274,19 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   return res.status(500).json({ ok: false, message: "internal_error" });
 });
 
-const PORT = Number(config.PORT ?? process.env.PORT ?? 3000);
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`BN9 backend listening on :${PORT}`);
+const HOST = (process.env.HOST || "0.0.0.0").trim() || "0.0.0.0";
+const PORT_ENV = (process.env.PORT || "").trim();
+const PORT = Number(PORT_ENV || config.PORT || 3000);
+const REDIS_URL =
+  process.env.REDIS_URL ||
+  (process.env.REDIS_PORT ? `redis://127.0.0.1:${process.env.REDIS_PORT}` : "");
+const REDIS_PORT = process.env.REDIS_PORT || "";
+
+app.listen(PORT, HOST, () => {
+  console.log(
+    `[BOOT] listening on http://${HOST}:${PORT} (PORT env=${PORT_ENV || "n/a"})`
+  );
+  console.log("[env]", { HOST, PORT, REDIS_URL, REDIS_PORT });
 });
 
 export default app;
-

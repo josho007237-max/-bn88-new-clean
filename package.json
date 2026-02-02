@@ -16,7 +16,8 @@
     "prisma:reset": "prisma migrate reset --force",
     "prisma:studio": "prisma studio",
     "migrate:deploy": "prisma migrate deploy",
-    "dev": "tsx watch src/server.ts",
+    "dev": "npx tsx watch src/server.ts",
+    "doctor": "node -v && npm -v && node -e \"const fs=require('fs');const p='node_modules/.bin/tsx';const PORT=process.env.PORT||'3000';console.log(fs.existsSync(p)?'tsx OK: '+p:'tsx MISSING: '+p);console.log('PORT='+PORT);\"",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
@@ -24,6 +25,7 @@
     "@eslint/js": "^9.39.2",
     "eslint": "^9.39.2",
     "prettier": "^3.7.4",
+    "tsx": "^4.21.0",
     "typescript-eslint": "^8.50.1"
   }
 }

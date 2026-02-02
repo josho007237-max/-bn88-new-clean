@@ -17,9 +17,12 @@ if (-not $health.ok) { throw "health not ok" }
 # --------------------------------------------------------------------
 # 2) login admin (JWT)
 # --------------------------------------------------------------------
-Write-Host "`n#2) POST /auth/login (admin)" -ForegroundColor Yellow
-$body = @{ email = "root@bn9.local"; password = "bn9@12345" } | ConvertTo-Json
-$login = Invoke-RestMethod -Method Post -Uri "$Base/auth/login" `
+Write-Host "`n#2) POST /admin/auth/login (admin)" -ForegroundColor Yellow
+$LoginEmail = if ($env:BN88_ADMIN_EMAIL) { $env:BN88_ADMIN_EMAIL } else { "root@bn9.local" }
+$LoginPassword = if ($env:BN88_ADMIN_PASSWORD) { $env:BN88_ADMIN_PASSWORD } else { "bn9@12345" }
+$loginUrl = "$Base/admin/auth/login"
+$body = @{ email = $LoginEmail; password = $LoginPassword } | ConvertTo-Json
+$login = Invoke-RestMethod -Method Post -Uri $loginUrl `
   -ContentType "application/json" -Body $body
 
 $token = $login.token

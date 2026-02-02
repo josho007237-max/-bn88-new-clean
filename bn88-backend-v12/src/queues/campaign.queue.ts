@@ -1,10 +1,32 @@
 import { Queue, Worker, JobsOptions } from "bullmq";
-import { config } from "../config";
 import { createRequestLogger } from "../utils/logger";
 import { queueCampaign } from "../services/lepClient";
 
-const connection = { url: config.REDIS_URL };
+const redisUrl =
+  process.env.REDIS_URL ||
+  (process.env.REDIS_PORT ? `redis://127.0.0.1:${process.env.REDIS_PORT}` : "");
+const redisSkipFlag = process.env.DISABLE_REDIS === "1" || process.env.ENABLE_REDIS === "0";
+const redisEnabled = Boolean(redisUrl) && !redisSkipFlag;
+const connection = redisEnabled
+  ? {
+      url: redisUrl,
+      retryStrategy: (times: number) => Math.min(times * 5000, 60_000),
+    }
+  : null;
 const queueName = "lep-campaign";
+const redisLog = createRequestLogger("redis");
+let redisDisabledWarned = false;
+let redisConnectedLogged = false;
+let redisErrorLoggedOnce = false;
+const redisDisabledMessage = redisSkipFlag
+  ? "[redis] disabled via DISABLE_REDIS=1 or ENABLE_REDIS=0. Set REDIS_URL or REDIS_PORT to enable queues."
+  : "[redis] disabled. Set REDIS_URL or REDIS_PORT to enable queues (e.g. REDIS_URL=redis://127.0.0.1:6380).";
+
+function warnRedisDisabled() {
+  if (redisDisabledWarned) return;
+  redisDisabledWarned = true;
+  redisLog.warn(redisDisabledMessage);
+}
 
 export type CampaignScheduleJob = {
   scheduleId: string;
@@ -16,8 +38,14 @@ let queueInstance: Queue<CampaignScheduleJob> | null = null;
 let workerStarted = false;
 
 function getQueue() {
+  if (!redisEnabled) {
+    warnRedisDisabled();
+    return null;
+  }
   if (!queueInstance) {
-    queueInstance = new Queue<CampaignScheduleJob>(queueName, { connection });
+    queueInstance = new Queue<CampaignScheduleJob>(queueName, {
+      connection: connection!,
+    });
   }
   return queueInstance;
 }
@@ -32,6 +60,7 @@ export async function upsertCampaignScheduleJob(
   }
 ) {
   const q = getQueue();
+  if (!q) return null;
   const log = createRequestLogger(job.requestId);
 
   const repeat: JobsOptions["repeat"] = {
@@ -69,6 +98,7 @@ export async function upsertCampaignScheduleJob(
 
 export async function removeCampaignScheduleJob(scheduleId: string) {
   const q = getQueue();
+  if (!q) return;
   const repeatables = await q.getRepeatableJobs();
   for (const r of repeatables) {
     if (r.id === scheduleId || r.key.includes(scheduleId)) {
@@ -79,32 +109,52 @@ export async function removeCampaignScheduleJob(scheduleId: string) {
 
 export function startCampaignScheduleWorker() {
   if (workerStarted) return;
+  if (!redisEnabled) {
+    warnRedisDisabled();
+    return;
+  }
   workerStarted = true;
-
-  const worker = new Worker<CampaignScheduleJob>(
-    queueName,
-    async (job) => {
-      const log = createRequestLogger(job.data.requestId || job.id);
-      log.info("[campaign.schedule] firing", {
-        scheduleId: job.data.scheduleId,
-        campaignId: job.data.campaignId,
-      });
-      try {
-        await queueCampaign(job.data.campaignId);
-        log.info("[campaign.schedule] queued campaign", {
+  try {
+    const worker = new Worker<CampaignScheduleJob>(
+      queueName,
+      async (job) => {
+        const log = createRequestLogger(job.data.requestId || job.id);
+        log.info("[campaign.schedule] firing", {
+          scheduleId: job.data.scheduleId,
           campaignId: job.data.campaignId,
         });
-      } catch (err) {
-        log.error("[campaign.schedule] queue failed", err);
-        throw err;
-      }
-    },
-    { connection }
-  );
+        try {
+          await queueCampaign(job.data.campaignId);
+          log.info("[campaign.schedule] queued campaign", {
+            campaignId: job.data.campaignId,
+          });
+        } catch (err) {
+          log.error("[campaign.schedule] queue failed", err);
+          throw err;
+        }
+      },
+      { connection: connection! }
+    );
 
-  worker.on("failed", (job, err) => {
-    const log = createRequestLogger(job?.data?.requestId || job?.id);
-    log.error("[campaign.schedule] worker failed", err);
-  });
+    worker.on("error", (err) => {
+      if (redisErrorLoggedOnce) return;
+      redisErrorLoggedOnce = true;
+      redisLog.warn("[redis] connection error (retrying with backoff)", err);
+    });
+    worker.on("ready", () => {
+      if (redisConnectedLogged) return;
+      redisConnectedLogged = true;
+      redisErrorLoggedOnce = false;
+      redisLog.info("[redis] redis_connected", { url: redisUrl });
+    });
+
+    worker.on("failed", (job, err) => {
+      const log = createRequestLogger(job?.data?.requestId || job?.id);
+      log.error("[campaign.schedule] worker failed", err);
+    });
+  } catch (err) {
+    workerStarted = false;
+    redisLog.warn("[redis] worker start failed (will retry)", err);
+    setTimeout(() => startCampaignScheduleWorker(), 10_000);
+  }
 }
-

@@ -47,7 +47,7 @@ function getApiBase(): string {
 }
 
 function getAuthTokenFromStorage(): string | undefined {
-  const keys = ["auth_token", "token", "access_token", "AUTH_TOKEN"];
+  const keys = ["bn9_jwt", "auth_token", "token", "access_token", "AUTH_TOKEN"];
   for (const k of keys) {
     const v = localStorage.getItem(k);
     if (v && v.trim()) return v.trim();

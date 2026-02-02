@@ -70,12 +70,53 @@ export function requirePermission(required: PermissionName[]) {
     const log = createRequestLogger(requestId);
 
     // ✅ ใช้ auth ที่ authGuard ใส่ไว้ (แทนการ verify token ซ้ำ)
-    const auth = ((req as any).auth ?? (req as any).admin) as AuthFromGuard | undefined;
+    const requestAuth = (req as any).auth;
+    const requestAdmin = (req as any).admin;
+    const auth = (requestAuth ?? requestAdmin) as AuthFromGuard | undefined;
+    if (auth) {
+      if (!requestAuth) (req as any).auth = auth;
+      if (!requestAdmin) (req as any).admin = auth;
+    }
 
     const adminId = auth?.sub || auth?.id; // ✅ รองรับ sub เป็นหลัก
     const roles = (auth?.roles ?? []).map((r) => String(r));
+    const authFieldNames = auth ? Object.keys(auth) : [];
+    const route = `${req.method} ${req.originalUrl || req.url}`;
+    const tenantHeader = ((req.headers["x-tenant"] as string | undefined) ?? "").trim();
+    const authorizationHeader = req.headers.authorization;
+    const hasToken =
+      typeof authorizationHeader === "string" &&
+      authorizationHeader.trim().toLowerCase().startsWith("bearer ");
+    const DEBUG_PERMISSION_LOG = process.env.DEBUG === "1";
+    const DEBUG_AUTH_LOG = process.env.DEBUG_AUTH === "1";
+    const logAuthState = (reason: string, extra: Record<string, unknown> = {}) => {
+      if (!DEBUG_AUTH_LOG) return;
+      log.info("[requirePermission] auth deny", {
+        reason,
+        route,
+        tenant: tenantHeader || undefined,
+        hasToken,
+        adminId,
+        roles,
+        permissions: auth?.permissions,
+        ...extra,
+      });
+    };
+    const debugFieldTrace = (reason: string, extra: Record<string, unknown> = {}) => {
+      if (!DEBUG_PERMISSION_LOG) return;
+      log.info("[requirePermission] debug deny", {
+        reason,
+        adminId,
+        roles,
+        permissions: auth?.permissions,
+        authFields: authFieldNames,
+        ...extra,
+      });
+    };
 
     if (!adminId) {
+      logAuthState("missing_adminId");
+      debugFieldTrace("missing_adminId");
       return res.status(401).json({ ok: false, message: "unauthorized" });
     }
 
@@ -107,12 +148,20 @@ export function requirePermission(required: PermissionName[]) {
 
       const granted = await collectPermissions(String(adminId));
       if (granted.size === 0) {
+        logAuthState("rbac_empty");
+        debugFieldTrace("rbac_empty");
         log.warn("RBAC deny: no permissions for admin", adminId);
         return res.status(403).json({ ok: false, message: "forbidden" });
       }
 
       const ok = required.some((perm) => granted.has(perm));
       if (!ok) {
+        logAuthState("rbac_missing_permission", {
+          granted: Array.from(granted),
+        });
+        debugFieldTrace("rbac_missing_permission", {
+          granted: Array.from(granted),
+        });
         log.warn("RBAC deny: missing permission", { required, adminId });
         return res.status(403).json({ ok: false, message: "forbidden" });
       }

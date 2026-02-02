@@ -48,6 +48,8 @@ import {
   updateEngagementMessage,
   deleteEngagementMessage,
   getLineContentBlob,
+  getToken,
+  downloadObjectUrl,
 } from "../lib/api";
 
 const POLL_INTERVAL_MS = 3000; // 3 วินาที
@@ -426,6 +428,18 @@ const ChatCenter: React.FC = () => {
   // map รูป (LINE) ที่โหลดเป็น blob แล้ว
   const [imgUrlMap, setImgUrlMap] = useState<Record<string, string>>({});
   const imgUrlCreatedRef = useRef<Record<string, string>>({});
+  const fetchLineImageUrl = useCallback(async (messageId: string) => {
+    const blob = await getLineContentBlob(messageId);
+    return URL.createObjectURL(blob);
+  }, []);
+
+  // map ไฟล์ (LINE) ที่โหลดเป็น blob แล้ว
+  const [fileUrlMap, setFileUrlMap] = useState<Record<string, string>>({});
+  const fileUrlCreatedRef = useRef<Record<string, string>>({});
+  const fetchLineFileUrl = useCallback(async (messageId: string) => {
+    const blob = await getLineContentBlob(messageId);
+    return URL.createObjectURL(blob);
+  }, []);
 
   // ล้าง objectURL เก่าทุกครั้งที่เปลี่ยน session (กัน memory leak + กันรูปค้าง)
   useEffect(() => {
@@ -440,7 +454,38 @@ const ChatCenter: React.FC = () => {
       return {};
     });
     imgUrlCreatedRef.current = {};
+    setFileUrlMap((prev) => {
+      Object.values(prev).forEach((u) => {
+        try {
+          URL.revokeObjectURL(u);
+        } catch {
+          // ignore
+        }
+      });
+      return {};
+    });
+    fileUrlCreatedRef.current = {};
   }, [selectedSession?.id]);
+
+  // revoke objectURL เมื่อ unmount
+  useEffect(() => {
+    return () => {
+      Object.values(imgUrlCreatedRef.current).forEach((u) => {
+        try {
+          URL.revokeObjectURL(u);
+        } catch {
+          // ignore
+        }
+      });
+      Object.values(fileUrlCreatedRef.current).forEach((u) => {
+        try {
+          URL.revokeObjectURL(u);
+        } catch {
+          // ignore
+        }
+      });
+    };
+  }, []);
 
   const tenant = import.meta.env.VITE_TENANT || "bn9";
   const apiBase = getApiBase();
@@ -614,8 +659,7 @@ const ChatCenter: React.FC = () => {
         if (imgUrlCreatedRef.current[m.id]) continue;
 
         try {
-          const blob = await getLineContentBlob(m.id);
-          const url = URL.createObjectURL(blob);
+          const url = await fetchLineImageUrl(m.id);
 
           if (cancelled) {
             URL.revokeObjectURL(url);
@@ -687,7 +731,7 @@ const ChatCenter: React.FC = () => {
     if (!ENABLE_SSE) return;
     if (!tenant) return;
 
-    const token = localStorage.getItem("token"); // เปลี่ยน key ให้ตรงของคุณถ้าไม่ใช่ "token"
+    const token = getToken();
     if (!token) return;
 
     const base = apiBase.replace(/\/$/, "");
@@ -2009,21 +2053,62 @@ const ChatCenter: React.FC = () => {
                 } else if (msgType === "FILE") {
                   const fileName =
                     (m.attachmentMeta as any)?.fileName || "ไฟล์แนบ";
-                  content = (
-                    <div className="space-y-1">
-                      {m.text && (
-                        <div className="whitespace-pre-line">{m.text}</div>
-                      )}
-                      <a
-                        href={m.attachmentUrl || "#"}
-                        target={m.attachmentUrl ? "_blank" : undefined}
-                        rel="noreferrer"
-                        className="underline text-emerald-200"
-                      >
-                        {fileName}
-                      </a>
-                    </div>
-                  );
+                  if (plat === "line") {
+                    const fileUrl = fileUrlMap[m.id];
+                    const handleOpenLineFile = async (
+                      ev: React.MouseEvent<HTMLAnchorElement>
+                    ) => {
+                      ev.preventDefault();
+                      ev.stopPropagation();
+
+                      let url = fileUrlCreatedRef.current[m.id];
+                      if (!url) {
+                        try {
+                          url = await fetchLineFileUrl(m.id);
+                          fileUrlCreatedRef.current[m.id] = url;
+                          setFileUrlMap((prev) => ({ ...prev, [m.id]: url }));
+                        } catch (e) {
+                          console.warn("load file blob failed", m.id, e);
+                          toast.error("โหลดไฟล์ไม่สำเร็จ");
+                          return;
+                        }
+                      }
+
+                      downloadObjectUrl(url, fileName);
+                    };
+
+                    content = (
+                      <div className="space-y-1">
+                        {m.text && (
+                          <div className="whitespace-pre-line">{m.text}</div>
+                        )}
+                        <a
+                          href={fileUrl || "#"}
+                          onClick={handleOpenLineFile}
+                          rel="noreferrer"
+                          className="underline text-emerald-200"
+                        >
+                          {fileName}
+                        </a>
+                      </div>
+                    );
+                  } else {
+                    content = (
+                      <div className="space-y-1">
+                        {m.text && (
+                          <div className="whitespace-pre-line">{m.text}</div>
+                        )}
+                        <a
+                          href={m.attachmentUrl || "#"}
+                          target={m.attachmentUrl ? "_blank" : undefined}
+                          rel="noreferrer"
+                          className="underline text-emerald-200"
+                        >
+                          {fileName}
+                        </a>
+                      </div>
+                    );
+                  }
                 } else {
                   content = (
                     <div className="space-y-1">

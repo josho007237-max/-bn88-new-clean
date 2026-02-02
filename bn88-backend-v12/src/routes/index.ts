@@ -17,7 +17,7 @@ import { chatAdminRouter } from "./admin/chat";
 import adminAuthRouter from "./admin/auth";
 
 // ✅ เพิ่ม: guard ที่ยิง missing_token
-import { authGuard } from "../middleware/authGuard";
+import { authGuard } from "../mw/auth";
 
 /**
  * helper: ดึง router จาก module ที่ export ไม่แน่นอน

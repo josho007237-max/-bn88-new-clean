@@ -122,6 +122,13 @@ router.post("/login", async (req: Request, res: Response) => {
       subject: String(user.id),
     });
 
+    res.cookie("bn88_token", token, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      secure: config.isProd,
+    });
+
     return res.json({
       ok: true,
       token,

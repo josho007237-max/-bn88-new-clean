@@ -18,6 +18,7 @@ import { buildQuickReplyMenu } from "../../line/quickReply";
 const router = Router();
 const TENANT_DEFAULT = process.env.TENANT_DEFAULT || "bn9";
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "";
+const DEBUG_WEBHOOKS = process.env.DEBUG_WEBHOOKS === "1";
 
 /**
  * ถ้า CaseItem.kind เป็น enum ใน Prisma:
@@ -42,7 +43,9 @@ function getChannelKeyFromSource(src?: any) {
   return src?.groupId || src?.roomId || "default";
 }
 
-function getRawBody(req: Request): Buffer | null {
+export function getRawBody(req: Request): Buffer | null {
+  const rb: unknown = (req as any).rawBody;
+  if (Buffer.isBuffer(rb)) return rb;
   const b: unknown = (req as any).body;
   if (Buffer.isBuffer(b)) return b;
   if (typeof b === "string") return Buffer.from(b);
@@ -59,12 +62,16 @@ function verifyLineSignature(req: Request, channelSecret?: string): boolean {
 
   if (!secret || !sig || !raw) return false;
 
-  const expected = crypto
-    .createHmac("sha256", secret)
-    .update(raw)
-    .digest("base64");
+  const expected = createLineSignature(raw, secret);
 
   return expected === sig;
+}
+
+export function createLineSignature(raw: Buffer, channelSecret?: string): string {
+  const secret = channelSecret || config.LINE_CHANNEL_SECRET;
+  if (!secret) return "";
+
+  return crypto.createHmac("sha256", secret).update(raw).digest("base64");
 }
 
 /* ------------------------------------------------------------------ */
@@ -199,7 +206,7 @@ export function mapLineMessage(m?: LineMessage): NormalizedLineMessage | null {
 /* Bot resolver (หา bot + secrets สำหรับ LINE)                         */
 /* ------------------------------------------------------------------ */
 
-async function resolveBot(tenant: string, botIdParam?: string) {
+export async function resolveBot(tenant: string, botIdParam?: string) {
   let bot: { id: string; tenant: string; platform: string } | null = null;
 
   if (botIdParam) {
@@ -223,10 +230,17 @@ async function resolveBot(tenant: string, botIdParam?: string) {
 
   if (!bot?.id) return null;
 
-  const sec = await prisma.botSecret.findFirst({
+  const secrets = await prisma.botSecret.findMany({
     where: { botId: bot.id },
     select: { channelSecret: true, channelAccessToken: true },
   });
+  if (secrets.length > 1) {
+    throw new Error("botsecret_duplicate");
+  }
+  if (secrets.length === 0) {
+    throw new Error("botsecret_missing");
+  }
+  const sec = secrets[0];
 
   return {
     botId: bot.id,
@@ -414,28 +428,56 @@ async function classifyImageBuffer(
 }
 
 /* ------------------------------------------------------------------ */
-/* POST /api/webhooks/line?botId=...                                  */
+/* POST /api/webhooks/line?tenant=...&botId=...                        */
+/* POST /api/webhooks/line/:tenant/:botId                             */
 /* ------------------------------------------------------------------ */
 
-router.post("/", async (req: Request, res: Response) => {
+export async function handleLineWebhook(req: Request, res: Response) {
   const requestId = getRequestId(req);
   const log = createRequestLogger(requestId);
   type PendingImageKind = "activity" | "image_question";
+  const rawBody = getRawBody(req);
+  const bodyLength = rawBody ? rawBody.length : 0;
 
   try {
+    if (DEBUG_WEBHOOKS) {
+      log.info("[LINE webhook] start");
+    }
+    const tenantQuery =
+      typeof req.query.tenant === "string" ? (req.query.tenant as string) : "";
+    const tenantParam =
+      typeof req.params.tenant === "string" ? req.params.tenant : "";
     const tenantHeader =
-      (req.headers["x-tenant"] as string) ||
-      config.TENANT_DEFAULT ||
-      TENANT_DEFAULT;
+      typeof req.headers["x-tenant"] === "string"
+        ? (req.headers["x-tenant"] as string)
+        : "";
+    const tenantResolved =
+      tenantQuery || tenantParam || tenantHeader || config.TENANT_DEFAULT || TENANT_DEFAULT;
 
+    const botIdQuery =
+      typeof req.query.botId === "string" ? (req.query.botId as string) : "";
     const botIdParam =
-      typeof req.query.botId === "string"
-        ? (req.query.botId as string)
-        : undefined;
+      typeof req.params.botId === "string" ? req.params.botId : "";
+    const botIdResolved = botIdQuery || botIdParam || undefined;
 
-    const picked = await resolveBot(tenantHeader, botIdParam);
+    if (DEBUG_WEBHOOKS) {
+      const sig =
+        typeof req.headers["x-line-signature"] === "string"
+          ? (req.headers["x-line-signature"] as string)
+          : "";
+      log.info("[LINE webhook] debug", {
+        method: req.method,
+        url: req.originalUrl || req.url,
+        tenant: tenantResolved,
+        botId: botIdResolved,
+        signature_present: sig.length > 0,
+        body_length: bodyLength,
+      });
+    }
+
+    const picked = await resolveBot(tenantResolved, botIdResolved);
     if (!picked) {
-      log.error("[LINE webhook] bot not configured for tenant", tenantHeader);
+      log.error("[LINE webhook] bot not configured for tenant", tenantResolved);
       return res
         .status(400)
         .json({ ok: false, message: "line_bot_not_configured" });
@@ -443,8 +485,17 @@ router.post("/", async (req: Request, res: Response) => {
 
     const { botId, tenant, channelSecret, channelAccessToken } = picked;
 
-    if (!verifyLineSignature(req, channelSecret)) {
-      log.warn("[LINE webhook] invalid signature");
+    const signatureOk = verifyLineSignature(req, channelSecret);
+    if (DEBUG_WEBHOOKS) {
+      log.info("[LINE webhook] verify", {
+        tenant: tenantResolved,
+        botId: botIdResolved,
+        body_length: bodyLength,
+        signature_ok: signatureOk,
+      });
+    }
+    if (!signatureOk) {
+      log.warn("[LINE webhook] line_signature_invalid", { tenant, botId });
       return res.status(401).json({ ok: false, message: "invalid_signature" });
     }
 
@@ -465,6 +516,14 @@ router.post("/", async (req: Request, res: Response) => {
       return res.status(200).json({ ok: true, noEvents: true });
 
     const isRetry = Boolean(req.headers["x-line-retry-key"]);
+    if (DEBUG_WEBHOOKS) {
+      log.info("[LINE webhook] events", {
+        tenant,
+        botId,
+        count: events.length,
+        isRetry,
+      });
+    }
     const platform: SupportedPlatform = "line";
     const results: Array<Record<string, unknown>> = [];
     
@@ -914,6 +973,7 @@ if (ev.type === "postback") {
         }
 
         // ตอบ LINE (ยกเว้น retry)
+        finalReply = `รับแล้ว: ${text}`;
         let replySent = false;
         if (!isRetry && ev.replyToken && channelAccessToken && finalReply) {
           replySent = await lineReply(ev.replyToken, channelAccessToken, [
@@ -936,10 +996,19 @@ if (ev.type === "postback") {
       requestId,
     });
   } catch (e) {
+    const msg = (e as Error)?.message;
+    if (msg === "botsecret_missing" || msg === "botsecret_duplicate") {
+      log.error("[LINE webhook] botsecret_error", { message: msg });
+      return res.status(400).json({ ok: false, message: msg });
+    }
     log.error("[LINE WEBHOOK ERROR]", e);
     return res.status(500).json({ ok: false, message: "internal_error" });
   }
-});
+}
+
+router.post("/", handleLineWebhook);
+router.post("/:tenant", handleLineWebhook);
+router.post("/:tenant/:botId", handleLineWebhook);
 
 export default router;
 export { router as lineWebhookRouter };

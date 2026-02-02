@@ -3,9 +3,18 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { approveActivityCase } from "../services/activity/approveActivityCase";
+import { config } from "../config";
+import {
+  createLineSignature,
+  getRawBody,
+  handleLineWebhook,
+  resolveBot,
+} from "./webhooks/line";
 
 // export ทั้ง named + default เหมือนเดิม
 export const dev = Router();
+const DEV_ROUTES_ENABLED =
+  process.env.NODE_ENV === "development" || process.env.ENABLE_DEV_ROUTES === "1";
 
 // (ออปชัน) ถ้ามีตัว publish ใน live.ts จะใช้ยิง SSE ให้ FE รีเฟรช
 let publish: ((tenant: string, event: string, data?: any) => void) | null =
@@ -49,6 +58,52 @@ dev.post("/dev/activity/approve", async (req: Request, res: Response) => {
     }
 
     return res.json({ ok: true, ...r });
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    return res.status(400).json({ ok: false, error: msg });
+  }
+});
+
+/* ============================================================================
+ * POST /api/dev/line-webhook-test
+ * - ยิง LINE webhook แบบไม่ต้องมี signature จาก client
+ * ========================================================================== */
+dev.post("/line-webhook-test", async (req: Request, res: Response) => {
+  if (!DEV_ROUTES_ENABLED) {
+    return res.status(404).json({ ok: false, message: "not_found" });
+  }
+
+  try {
+    const tenantQuery =
+      typeof req.query.tenant === "string" ? (req.query.tenant as string) : "";
+    const botIdQuery =
+      typeof req.query.botId === "string" ? (req.query.botId as string) : "";
+    const tenantHeader =
+      typeof req.headers["x-tenant"] === "string"
+        ? (req.headers["x-tenant"] as string)
+        : "";
+    const tenantResolved = tenantQuery || tenantHeader || config.TENANT_DEFAULT;
+    const botIdResolved = botIdQuery || undefined;
+
+    const picked = await resolveBot(tenantResolved, botIdResolved);
+    if (!picked) {
+      return res
+        .status(400)
+        .json({ ok: false, message: "line_bot_not_configured" });
+    }
+    if (!picked.channelSecret) {
+      return res
+        .status(400)
+        .json({ ok: false, message: "missing_channel_secret" });
+    }
+
+    const raw = getRawBody(req) ?? Buffer.from(JSON.stringify(req.body ?? {}));
+    const signature = createLineSignature(raw, picked.channelSecret);
+
+    (req.headers as any)["x-line-signature"] = signature;
+    (req as any).body = raw;
+
+    return handleLineWebhook(req, res);
   } catch (e: any) {
     const msg = String(e?.message ?? e);
     return res.status(400).json({ ok: false, error: msg });

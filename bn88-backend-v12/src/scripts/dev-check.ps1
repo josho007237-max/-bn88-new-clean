@@ -1,9 +1,73 @@
 param(
-  [string]$Base = "http://127.0.0.1:3000/api",
+  [string]$Base = "",
   [string]$Tenant = "bn9"
 )
 
 Write-Host "=== BN9 DEV CHECK ===" -ForegroundColor Cyan
+
+# --------------------------------------------------------------------
+# 0) Working dir guard (package.json + src)
+# --------------------------------------------------------------------
+$ExpectedRoot = "C:\BN88\BN88-new-clean\bn88-backend-v12"
+$Cwd = (Get-Location).Path
+$PkgOk = Test-Path (Join-Path $Cwd "package.json")
+$SrcOk = Test-Path (Join-Path $Cwd "src")
+if (-not ($PkgOk -and $SrcOk)) {
+  Write-Host "ไม่พบ package.json หรือ src ในโฟลเดอร์นี้: $Cwd" -ForegroundColor Red
+  Write-Host "กรุณาใช้คำสั่ง: cd $ExpectedRoot" -ForegroundColor Yellow
+  exit 1
+}
+
+# --------------------------------------------------------------------
+# 0) Resolve PORT + Base
+# --------------------------------------------------------------------
+$Port = if ($env:PORT) { [int]$env:PORT } else { 3000 }
+if (-not $Base) { $Base = "http://127.0.0.1:$Port/api" }
+Write-Host "Base = $Base (PORT=$Port)" -ForegroundColor DarkCyan
+
+# --------------------------------------------------------------------
+# 0.1) netstat check
+# --------------------------------------------------------------------
+Write-Host "`n#0.1) netstat :$Port" -ForegroundColor Yellow
+$netstatOk = $false
+try {
+  $netstatLine = netstat -ano | Select-String -Pattern "LISTENING" | Select-String -Pattern ":$Port\s"
+  if ($netstatLine) {
+    $netstatOk = $true
+    $netstatLine | Select-Object -First 1 | ForEach-Object { Write-Host $_ -ForegroundColor Green }
+  } else {
+    Write-Host "not listening on :$Port" -ForegroundColor Red
+  }
+} catch {
+  Write-Host "netstat error: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# --------------------------------------------------------------------
+# 0.2) curl /api/health
+# --------------------------------------------------------------------
+Write-Host "`n#0.2) curl /api/health" -ForegroundColor Yellow
+$healthUrl = "$Base/health"
+$healthOk = $false
+$curlOut = & curl.exe -sS -w "`n%{http_code}" "$healthUrl" 2>&1
+$curlOk = ($LASTEXITCODE -eq 0)
+if (-not $curlOk) {
+  Write-Host "curl error: $curlOut" -ForegroundColor Red
+  $healthOk = $false
+} else {
+  $parts = $curlOut -split "`n"
+  $status = $parts[-1].Trim()
+  $body = ($parts[0..($parts.Length - 2)] -join "`n").Trim()
+  Write-Host $body
+  if ($status -eq "200") { $healthOk = $true }
+  Write-Host "status=$status" -ForegroundColor $(if ($healthOk) { "Green" } else { "Red" })
+}
+
+# Summary preflight
+if ($netstatOk -and $healthOk) {
+  Write-Host "Preflight PASS ✅" -ForegroundColor Green
+} else {
+  Write-Host "Preflight FAIL ❌ (netstat=$netstatOk, health=$healthOk)" -ForegroundColor Red
+}
 
 # --------------------------------------------------------------------
 # 1) /health
@@ -16,9 +80,12 @@ if (-not $health.ok) { throw "health not ok" }
 # --------------------------------------------------------------------
 # 2) login admin (JWT)
 # --------------------------------------------------------------------
-Write-Host "`n#2) POST /auth/login (admin)" -ForegroundColor Yellow
-$body = @{ email = "root@bn9.local"; password = "bn9@12345" } | ConvertTo-Json
-$login = Invoke-RestMethod -Method Post -Uri "$Base/auth/login" `
+Write-Host "`n#2) POST /admin/auth/login (admin)" -ForegroundColor Yellow
+$LoginEmail = if ($env:BN88_ADMIN_EMAIL) { $env:BN88_ADMIN_EMAIL } else { "root@bn9.local" }
+$LoginPassword = if ($env:BN88_ADMIN_PASSWORD) { $env:BN88_ADMIN_PASSWORD } else { "bn9@12345" }
+$loginUrl = "$Base/admin/auth/login"
+$body = @{ email = $LoginEmail; password = $LoginPassword } | ConvertTo-Json
+$login = Invoke-RestMethod -Method Post -Uri $loginUrl `
   -ContentType "application/json" -Body $body
 
 $token = $login.token
@@ -79,3 +146,4 @@ $cases = Invoke-RestMethod "$Base/cases/recent?botId=$botId&limit=5" -Headers $H
 $cases.items | Format-Table id,userId,text,kind,createdAt
 
 Write-Host "`nALL CHECKS PASSED ✅" -ForegroundColor Green
+Write-Host "Summary: PORT=$Port, HEALTH=$healthUrl" -ForegroundColor DarkCyan

@@ -1,27 +1,11 @@
-# env
-**/.env
-**/.env.*
-!.env.example
-
-# node_modules
-**/node_modules/
-
-# build outputs (match nested folders)
-**/dist/
-**/build/
-**/.next/
-**/.vite/
-
-# db/local
-**/*.db
-**/*.sqlite
-**/*.sqlite3
-**/dev.db
-
-# archives / backups
-*.bak
-*.bak.*
-**/*.tar.gz
-line-engagement-platform/LEP-RUN.ps1
-
-tools/
+node_modules/
+dist/
+logs/
+*.log
+.env
+.env.*
+dev.db
+*.db
+.vscode/
+.DS_Store
+.wrangler/

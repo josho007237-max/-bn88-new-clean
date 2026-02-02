@@ -5,6 +5,19 @@ param(
 
 Write-Host "=== BN9 DEV CHECK EXTENDED ===" -ForegroundColor Cyan
 
+# --------------------------------------------------------------------
+# 0) Working dir guard (package.json + src)
+# --------------------------------------------------------------------
+$ExpectedRoot = "C:\BN88\BN88-new-clean\bn88-backend-v12"
+$Cwd = (Get-Location).Path
+$PkgOk = Test-Path (Join-Path $Cwd "package.json")
+$SrcOk = Test-Path (Join-Path $Cwd "src")
+if (-not ($PkgOk -and $SrcOk)) {
+  Write-Host "ไม่พบ package.json หรือ src ในโฟลเดอร์นี้: $Cwd" -ForegroundColor Red
+  Write-Host "กรุณาใช้คำสั่ง: cd $ExpectedRoot" -ForegroundColor Yellow
+  exit 1
+}
+
 # 1) health
 Write-Host "`n#1) /health" -ForegroundColor Yellow
 $health = Invoke-RestMethod "$Base/health"
@@ -12,9 +25,12 @@ $health | Format-Table
 if (-not $health.ok) { throw "health not ok" }
 
 # 2) login
-Write-Host "`n#2) /auth/login" -ForegroundColor Yellow
-$body = @{ email = "root@bn9.local"; password = "bn9@12345" } | ConvertTo-Json
-$login = Invoke-RestMethod -Method Post -Uri "$Base/auth/login" `
+Write-Host "`n#2) /admin/auth/login" -ForegroundColor Yellow
+$LoginEmail = if ($env:BN88_ADMIN_EMAIL) { $env:BN88_ADMIN_EMAIL } else { "root@bn9.local" }
+$LoginPassword = if ($env:BN88_ADMIN_PASSWORD) { $env:BN88_ADMIN_PASSWORD } else { "bn9@12345" }
+$loginUrl = "$Base/admin/auth/login"
+$body = @{ email = $LoginEmail; password = $LoginPassword } | ConvertTo-Json
+$login = Invoke-RestMethod -Method Post -Uri $loginUrl `
   -ContentType "application/json" -Body $body
 $token = $login.token
 if (-not $token) { throw "no token from login" }
@@ -70,3 +86,7 @@ $answer = Invoke-RestMethod -Method Post -Uri "$Base/ai/answer" -Headers $H `
 $answer | Format-List
 
 Write-Host "`nALL EXTENDED CHECKS PASSED (ถ้าไม่ throw error ระหว่างทาง) ✅" -ForegroundColor Green
+$portMatch = [regex]::Match($Base, ":(\d+)")
+$Port = if ($env:PORT) { [int]$env:PORT } elseif ($portMatch.Success) { [int]$portMatch.Groups[1].Value } else { 3000 }
+$HealthUrl = "$Base/health"
+Write-Host "Summary: PORT=$Port, HEALTH=$HealthUrl" -ForegroundColor DarkCyan

@@ -532,11 +532,19 @@ export function getLineContentUrl(id: string) {
   return withToken(`${base}${getLineContentPath(id)}`);
 }
 
+function buildAuthHeaders(): HeadersInit {
+  const headers: Record<string, string> = { "x-tenant": TENANT };
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
 export async function getLineContentBlob(messageId: string): Promise<Blob> {
-  const res = await API.get(getLineContentPath(messageId), {
-    responseType: "blob",
-  });
-  return res.data as Blob;
+  const base = API_BASE || "/api";
+  const url = `${base}${getLineContentPath(messageId)}`;
+  const res = await fetch(url, { headers: buildAuthHeaders() });
+  if (!res.ok) throw new Error(`line_content_fetch_failed:${res.status}`);
+  return await res.blob();
 }
 
 export async function fetchLineContentObjectUrl(messageId: string): Promise<{
@@ -545,16 +553,16 @@ export async function fetchLineContentObjectUrl(messageId: string): Promise<{
   contentType?: string;
   filename?: string;
 }> {
-  const res = await API.get(getLineContentPath(messageId), {
-    responseType: "blob",
-  });
-
-  const blob = res.data as Blob;
+  const base = API_BASE || "/api";
+  const requestUrl = `${base}${getLineContentPath(messageId)}`;
+  const res = await fetch(requestUrl, { headers: buildAuthHeaders() });
+  if (!res.ok) throw new Error(`line_content_fetch_failed:${res.status}`);
+  const blob = await res.blob();
   const url = URL.createObjectURL(blob);
 
   const contentType =
-    (res.headers?.["content-type"] as string | undefined) ?? undefined;
-  const cd = res.headers?.["content-disposition"] as string | undefined;
+    (res.headers?.get("content-type") as string | null) ?? undefined;
+  const cd = (res.headers?.get("content-disposition") as string | null) ?? undefined;
   const filename = cd?.match(/filename\*?=(?:UTF-8'')?("?)([^";]+)\1/i)?.[2];
 
   return { url, revoke: () => URL.revokeObjectURL(url), contentType, filename };
