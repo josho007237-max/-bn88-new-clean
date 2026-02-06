@@ -203,8 +203,8 @@ function buildLineEventId(ev: LineEvent): string {
   const raw = ev.webhookEventId || ev.message?.id || ev.replyToken || "";
   if (raw) return String(raw).trim();
 
-  const src = ev.source || {};
-  const srcKey = src.userId || src.groupId || src.roomId || "unknown";
+  const src = ev.source ?? undefined;
+  const srcKey = src?.userId || src?.groupId || src?.roomId || "unknown";
   return `${ev.type}:${srcKey}:${ev.timestamp}`;
 }
 
