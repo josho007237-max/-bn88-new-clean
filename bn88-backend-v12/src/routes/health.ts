@@ -8,16 +8,7 @@ router.get("/", (_req, res) => {
 
 router.get("/redis", async (_req, res) => {
   const redisUrl =
-    process.env.REDIS_URL ||
-    (process.env.REDIS_PORT ? `redis://127.0.0.1:${process.env.REDIS_PORT}` : "");
-
-  if (!redisUrl) {
-    return res.json({
-      ok: false,
-      enabled: false,
-      message: "redis_disabled",
-    });
-  }
+    String(process.env.REDIS_URL || "").trim() || "redis://127.0.0.1:6380";
 
   const startedAt = Date.now();
   const client = createClient({ url: redisUrl });
@@ -44,6 +35,5 @@ router.get("/redis", async (_req, res) => {
 });
 
 export default router;
-
 
 

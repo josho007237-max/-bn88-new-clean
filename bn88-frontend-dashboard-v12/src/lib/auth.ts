@@ -1,4 +1,4 @@
-const TOKEN_KEY = "bn9.admin.token";
+const TOKEN_KEY = "bn9_jwt";
 
 export function getToken(): string {
   return localStorage.getItem(TOKEN_KEY) || "";
@@ -16,7 +16,7 @@ export function clearToken() {
 
 // ใส่ Authorization เฉพาะเมื่อมี token เท่านั้น
 export function getAuthHeaders(): Record<string, string> {
-  const t = localStorage.getItem("BN9_TOKEN");
+  const t = getToken();
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 

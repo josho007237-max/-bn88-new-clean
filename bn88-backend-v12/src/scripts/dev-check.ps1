@@ -28,7 +28,24 @@ Write-Host "Base = $Base (PORT=$Port)" -ForegroundColor DarkCyan
 # --------------------------------------------------------------------
 # 0.1) netstat check
 # --------------------------------------------------------------------
-Write-Host "`n#0.1) netstat :$Port" -ForegroundColor Yellow
+Write-Host "`n#0.1) port 3000 owning process" -ForegroundColor Yellow
+$listenPid3000 = (Get-NetTCPConnection -LocalPort 3000 -State Listen).OwningProcess
+if ($listenPid3000 -is [array]) {
+  $listenPid3000 = ($listenPid3000 | Where-Object { $_ -gt 0 } | Select-Object -First 1)
+}
+if ($listenPid3000) {
+  $listenProc3000 = Get-CimInstance Win32_Process -Filter "ProcessId=$listenPid3000" -ErrorAction SilentlyContinue
+  $listenCommand3000 = if ($listenProc3000) { $listenProc3000.CommandLine } else { $null }
+  Write-Host "PID(3000): $listenPid3000" -ForegroundColor Green
+  Write-Host "CommandLine(3000): $listenCommand3000"
+} else {
+  Write-Host "not listening on :3000 (Get-NetTCPConnection)" -ForegroundColor Red
+}
+
+# --------------------------------------------------------------------
+# 0.2) netstat check
+# --------------------------------------------------------------------
+Write-Host "`n#0.2) netstat :$Port" -ForegroundColor Yellow
 $netstatOk = $false
 try {
   $netstatLine = netstat -ano | Select-String -Pattern "LISTENING" | Select-String -Pattern ":$Port\s"

@@ -28,6 +28,20 @@ function norm(v: unknown): string {
   return String(v ?? "").trim().toLowerCase();
 }
 
+function toDebugAuth(auth?: AuthFromGuard) {
+  if (!auth) return undefined;
+  return {
+    id: auth.id || auth.sub,
+    sub: auth.sub,
+    email: auth.email,
+    roles: Array.isArray(auth.roles) ? auth.roles.map(String) : [],
+    permissions: Array.isArray(auth.permissions)
+      ? auth.permissions.map(String)
+      : [],
+    tokenType: auth.tokenType,
+  };
+}
+
 function permissionsFromRoles(roles?: string[]): Set<PermissionName> {
   const set = new Set<PermissionName>();
   (roles ?? []).forEach((r) => {
@@ -69,14 +83,8 @@ export function requirePermission(required: PermissionName[]) {
     const requestId = getRequestId(req);
     const log = createRequestLogger(requestId);
 
-    // ✅ ใช้ auth ที่ authGuard ใส่ไว้ (แทนการ verify token ซ้ำ)
-    const requestAuth = (req as any).auth;
-    const requestAdmin = (req as any).admin;
-    const auth = (requestAuth ?? requestAdmin) as AuthFromGuard | undefined;
-    if (auth) {
-      if (!requestAuth) (req as any).auth = auth;
-      if (!requestAdmin) (req as any).admin = auth;
-    }
+    // ใช้ auth source เดียวจาก authGuard (req.auth)
+    const auth = (req as any).auth as AuthFromGuard | undefined;
 
     const adminId = auth?.sub || auth?.id; // ✅ รองรับ sub เป็นหลัก
     const roles = (auth?.roles ?? []).map((r) => String(r));
@@ -92,13 +100,14 @@ export function requirePermission(required: PermissionName[]) {
     const logAuthState = (reason: string, extra: Record<string, unknown> = {}) => {
       if (!DEBUG_AUTH_LOG) return;
       log.info("[requirePermission] auth deny", {
+        guard: "requirePermission",
         reason,
         route,
         tenant: tenantHeader || undefined,
         hasToken,
         adminId,
         roles,
-        permissions: auth?.permissions,
+        reqAuth: toDebugAuth(auth),
         ...extra,
       });
     };
@@ -113,6 +122,15 @@ export function requirePermission(required: PermissionName[]) {
         ...extra,
       });
     };
+    if (DEBUG_AUTH_LOG) {
+      log.info("[DEBUG_AUTH] requirePermission run", {
+        guard: "requirePermission",
+        route,
+        required,
+        tenant: tenantHeader || undefined,
+        reqAuth: toDebugAuth(auth),
+      });
+    }
 
     if (!adminId) {
       logAuthState("missing_adminId");

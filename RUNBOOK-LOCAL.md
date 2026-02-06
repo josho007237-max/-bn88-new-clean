@@ -12,6 +12,9 @@ Health check:
 curl http://localhost:3000/health
 ```
 
+## PowerShell: ห้ามใช้ $pid ให้ใช้ $procId
+- ใช้ตัวแปร `$procId` แทน `$pid` เพราะ `$PID` เป็นตัวแปรอัตโนมัติของ PowerShell
+
 ## Redis (dev)
 1. Start a redis container bound to the port the backend expects (6380).
 ```powershell

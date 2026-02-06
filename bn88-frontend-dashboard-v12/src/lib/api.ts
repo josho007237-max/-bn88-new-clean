@@ -455,6 +455,7 @@ export function getToken(): string {
 export function setToken(t: string) {
   try {
     localStorage.setItem(TOKEN_KEY, t);
+    window.dispatchEvent(new Event("bn9:token-changed"));
   } catch {
     // ignore
   }
@@ -464,6 +465,7 @@ export function clearToken() {
   try {
     localStorage.removeItem(TOKEN_KEY);
     for (const k of LEGACY_TOKEN_KEYS) localStorage.removeItem(k);
+    window.dispatchEvent(new Event("bn9:token-changed"));
   } catch {
     // ignore
   }
@@ -501,6 +503,19 @@ export function withToken(url?: string | null): string {
   return hash ? `${full}#${hash}` : full;
 }
 
+export function withTokenAndTenant(url?: string | null, tenant?: string): string {
+  if (!url) return "";
+  const withTok = withToken(url);
+  if (!tenant) return withTok;
+
+  const [base, hash] = withTok.split("#");
+  if (/[?&]tenant=/.test(base)) return withTok;
+
+  const sep = base.includes("?") ? "&" : "?";
+  const full = `${base}${sep}tenant=${encodeURIComponent(tenant)}`;
+  return hash ? `${full}#${hash}` : full;
+}
+
 export function getApiBase() {
   return API_BASE || "/api";
 }
@@ -529,7 +544,7 @@ export function getLineContentPath(id: string) {
 
 export function getLineContentUrl(id: string) {
   const base = API_BASE || "/api";
-  return withToken(`${base}${getLineContentPath(id)}`);
+  return withTokenAndTenant(`${base}${getLineContentPath(id)}`, TENANT);
 }
 
 function buildAuthHeaders(): HeadersInit {

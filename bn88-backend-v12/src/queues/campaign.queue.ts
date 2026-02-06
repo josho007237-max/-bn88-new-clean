@@ -3,8 +3,7 @@ import { createRequestLogger } from "../utils/logger";
 import { queueCampaign } from "../services/lepClient";
 
 const redisUrl =
-  process.env.REDIS_URL ||
-  (process.env.REDIS_PORT ? `redis://127.0.0.1:${process.env.REDIS_PORT}` : "");
+  String(process.env.REDIS_URL || "").trim() || "redis://127.0.0.1:6380";
 const redisSkipFlag = process.env.DISABLE_REDIS === "1" || process.env.ENABLE_REDIS === "0";
 const redisEnabled = Boolean(redisUrl) && !redisSkipFlag;
 const connection = redisEnabled
@@ -17,10 +16,9 @@ const queueName = "lep-campaign";
 const redisLog = createRequestLogger("redis");
 let redisDisabledWarned = false;
 let redisConnectedLogged = false;
-let redisErrorLoggedOnce = false;
 const redisDisabledMessage = redisSkipFlag
-  ? "[redis] disabled via DISABLE_REDIS=1 or ENABLE_REDIS=0. Set REDIS_URL or REDIS_PORT to enable queues."
-  : "[redis] disabled. Set REDIS_URL or REDIS_PORT to enable queues (e.g. REDIS_URL=redis://127.0.0.1:6380).";
+  ? "[redis] disabled via DISABLE_REDIS=1 or ENABLE_REDIS=0."
+  : "[redis] disabled.";
 
 function warnRedisDisabled() {
   if (redisDisabledWarned) return;
@@ -114,6 +112,7 @@ export function startCampaignScheduleWorker() {
     return;
   }
   workerStarted = true;
+  redisLog.info(`redis connecting to ${redisUrl}`);
   try {
     const worker = new Worker<CampaignScheduleJob>(
       queueName,
@@ -137,15 +136,12 @@ export function startCampaignScheduleWorker() {
     );
 
     worker.on("error", (err) => {
-      if (redisErrorLoggedOnce) return;
-      redisErrorLoggedOnce = true;
       redisLog.warn("[redis] connection error (retrying with backoff)", err);
     });
     worker.on("ready", () => {
       if (redisConnectedLogged) return;
       redisConnectedLogged = true;
-      redisErrorLoggedOnce = false;
-      redisLog.info("[redis] redis_connected", { url: redisUrl });
+      redisLog.info("redis connected");
     });
 
     worker.on("failed", (job, err) => {

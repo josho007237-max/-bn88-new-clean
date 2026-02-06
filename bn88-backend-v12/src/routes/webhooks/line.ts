@@ -19,6 +19,8 @@ const router = Router();
 const TENANT_DEFAULT = process.env.TENANT_DEFAULT || "bn9";
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "";
 const DEBUG_WEBHOOKS = process.env.DEBUG_WEBHOOKS === "1";
+const DEBUG_LINE_WEBHOOK = process.env.DEBUG_LINE_WEBHOOK === "1";
+const DEBUG_LINE_SIG = process.env.DEBUG_LINE_SIG === "1";
 
 /**
  * ถ้า CaseItem.kind เป็น enum ใน Prisma:
@@ -52,26 +54,8 @@ export function getRawBody(req: Request): Buffer | null {
   return null;
 }
 
-/** Verify LINE signature (ข้ามได้เมื่อ LINE_DEV_SKIP_VERIFY=1) */
-function verifyLineSignature(req: Request, channelSecret?: string): boolean {
-  if (config.LINE_DEV_SKIP_VERIFY === "1") return true;
-
-  const secret = channelSecret || config.LINE_CHANNEL_SECRET;
-  const sig = req.headers["x-line-signature"];
-  const raw = getRawBody(req);
-
-  if (!secret || !sig || !raw) return false;
-
-  const expected = createLineSignature(raw, secret);
-
-  return expected === sig;
-}
-
-export function createLineSignature(raw: Buffer, channelSecret?: string): string {
-  const secret = channelSecret || config.LINE_CHANNEL_SECRET;
-  if (!secret) return "";
-
-  return crypto.createHmac("sha256", secret).update(raw).digest("base64");
+export function createLineSignature(raw: Buffer, channelSecret: string): string {
+  return crypto.createHmac("sha256", channelSecret).update(raw).digest("base64");
 }
 
 /* ------------------------------------------------------------------ */
@@ -438,11 +422,82 @@ export async function handleLineWebhook(req: Request, res: Response) {
   type PendingImageKind = "activity" | "image_question";
   const rawBody = getRawBody(req);
   const bodyLength = rawBody ? rawBody.length : 0;
+  if (DEBUG_LINE_SIG) {
+    log.info("[LINE SIG] readiness", {
+      method: req.method,
+      url: req.originalUrl || req.url,
+      hasRawBody: Boolean(rawBody),
+      bodyLength,
+      contentType: req.get("content-type") || undefined,
+      hasSignature: Boolean(req.get("x-line-signature")),
+      bodyType: Buffer.isBuffer((req as any).body)
+        ? "buffer"
+        : typeof (req as any).body,
+    });
+  }
 
   try {
     if (DEBUG_WEBHOOKS) {
       log.info("[LINE webhook] start");
     }
+
+    // Signature verification MUST happen before any DB/Redis/scheduler work (Ticket 04)
+    const sig = req.get("x-line-signature") || "";
+    const secret = process.env.LINE_CHANNEL_SECRET || "";
+    if (!secret) {
+      if (DEBUG_LINE_WEBHOOK) {
+        log.warn("LINE verify: fail", {
+          contentLength: bodyLength,
+          reason: "LINE_SECRET_MISSING",
+        });
+      }
+      return res.status(500).json({ ok: false, error: "LINE_SECRET_MISSING" });
+    }
+    if (!sig) {
+      if (DEBUG_LINE_SIG) {
+        log.warn("[LINE SIG] invalid", { reason: "missing_signature" });
+      }
+      if (DEBUG_LINE_WEBHOOK) {
+        log.warn("LINE verify: fail", {
+          contentLength: bodyLength,
+          reason: "missing_signature",
+        });
+      }
+      return res.status(401).json({ ok: false, message: "invalid_signature" });
+    }
+    if (!rawBody) {
+      if (DEBUG_LINE_SIG) {
+        log.warn("[LINE SIG] invalid", { reason: "missing_raw_body" });
+      }
+      if (DEBUG_LINE_WEBHOOK) {
+        log.warn("LINE verify: fail", {
+          contentLength: bodyLength,
+          reason: "missing_raw_body",
+        });
+      }
+      return res.status(401).json({ ok: false, message: "invalid_signature" });
+    }
+
+    const expected = createLineSignature(rawBody, secret);
+    if (expected !== sig) {
+      if (DEBUG_LINE_SIG) {
+        log.warn("[LINE SIG] invalid", { reason: "signature_mismatch" });
+      }
+      if (DEBUG_LINE_WEBHOOK) {
+        log.warn("LINE verify: fail", {
+          contentLength: bodyLength,
+          reason: "signature_mismatch",
+        });
+      }
+      return res.status(401).json({ ok: false, message: "invalid_signature" });
+    }
+    if (DEBUG_LINE_WEBHOOK) {
+      log.info("LINE verify: ok", { contentLength: bodyLength });
+    }
+    if (DEBUG_LINE_SIG) {
+      log.info("[LINE SIG] valid", { bodyLength });
+    }
+
     const tenantQuery =
       typeof req.query.tenant === "string" ? (req.query.tenant as string) : "";
     const tenantParam =
@@ -483,20 +538,14 @@ export async function handleLineWebhook(req: Request, res: Response) {
         .json({ ok: false, message: "line_bot_not_configured" });
     }
 
-    const { botId, tenant, channelSecret, channelAccessToken } = picked;
-
-    const signatureOk = verifyLineSignature(req, channelSecret);
+    const { botId, tenant, channelAccessToken } = picked;
     if (DEBUG_WEBHOOKS) {
       log.info("[LINE webhook] verify", {
         tenant: tenantResolved,
         botId: botIdResolved,
         body_length: bodyLength,
-        signature_ok: signatureOk,
+        signature_ok: true,
       });
-    }
-    if (!signatureOk) {
-      log.warn("[LINE webhook] line_signature_invalid", { tenant, botId });
-      return res.status(401).json({ ok: false, message: "invalid_signature" });
     }
 
     let payload: LineWebhookBody | null = (req as any).body;

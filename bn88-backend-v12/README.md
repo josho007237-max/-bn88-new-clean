@@ -33,6 +33,16 @@ curl -H "Authorization: Bearer <TOKEN>" -H "x-tenant: bn9" http://localhost:3000
 curl -H "Authorization: Bearer <TOKEN>" -H "x-tenant: bn9" http://localhost:3000/api/admin/bots
 ```
 
+## Login payload (must use email)
+`POST /api/admin/auth/login` ต้องส่ง `email` + `password` (ไม่ใช่ `username`)
+
+PowerShell (`irm`) example:
+```powershell
+$body = @{ email = "admin@bn9.local"; password = "admin123" } | ConvertTo-Json
+$r = irm "http://127.0.0.1:3000/api/admin/auth/login" -Method POST -ContentType "application/json" -Headers @{ "x-tenant" = "bn9" } -Body $body
+$r.token
+```
+
 ## Cookie-based login & SSE
 Login and grab the Set-Cookie header before reusing the same session across SSE/EventSource:
 ```

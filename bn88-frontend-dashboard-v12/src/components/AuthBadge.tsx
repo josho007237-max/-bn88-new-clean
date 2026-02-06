@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from "react";
-import { clearToken } from "../lib/auth";
+import { clearToken, getToken } from "../lib/auth";
 
-const getToken = () => localStorage.getItem("bn9.admin.token") || "";
-const mask = (t: string) => (!t ? "" : t.length <= 10 ? "********" : `${t.slice(0, 4)}…${t.slice(-4)}`);
+const mask = (t: string) =>
+  !t ? "" : t.length <= 10 ? "********" : `${t.slice(0, 4)}…${t.slice(-4)}`;
 
 export default function AuthBadge() {
   const [tok, setTok] = useState(getToken());

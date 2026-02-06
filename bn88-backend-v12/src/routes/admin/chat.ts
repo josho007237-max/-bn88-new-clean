@@ -97,11 +97,11 @@ class HttpError extends Error {
 }
 
 function getTenant(req: Request): string {
-  return (
-    (req.headers["x-tenant"] as string) ||
-    config.TENANT_DEFAULT ||
-    TENANT_DEFAULT
-  );
+  const headerTenant = ((req.headers["x-tenant"] as string) || "").trim();
+  const queryTenant =
+    typeof req.query.tenant === "string" ? req.query.tenant.trim() : "";
+
+  return headerTenant || queryTenant || config.TENANT_DEFAULT || TENANT_DEFAULT;
 }
 
 type PrismaLike = typeof prisma;

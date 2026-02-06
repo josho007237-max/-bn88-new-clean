@@ -7,6 +7,7 @@ const prisma = new PrismaClient();
 async function main() {
   const email = process.env.ADMIN_EMAIL || "root@bn9.local";
   const plain = process.env.ADMIN_PASSWORD || "bn9@12345";
+  const tenant = process.env.TENANT_DEFAULT || "bn9";
 
   const hash = await bcrypt.hash(plain, 10);
 
@@ -69,7 +70,19 @@ async function main() {
     });
   }
 
-  console.log("Seeded admin:", { email, password: plain, id: admin.id });
+  await prisma.bot.upsert({
+    where: { tenant_name: { tenant, name: "admin-bot-001" } },
+    update: {},
+    create: { tenant, name: "admin-bot-001", platform: "line", active: true },
+    select: { id: true },
+  });
+
+  console.log("Seeded admin:", {
+    email,
+    password: plain,
+    id: admin.id,
+    tenant,
+  });
 }
 
 main()

@@ -7,6 +7,7 @@ const prisma = new PrismaClient();
 async function main() {
   const email = process.env.DEV_ADMIN_EMAIL || "admin@bn9.local";
   const password = process.env.DEV_ADMIN_PASSWORD || "admin123";
+  const tenant = process.env.TENANT_DEFAULT || "bn9";
 
   const hash = await bcrypt.hash(password, 10);
 
@@ -17,8 +18,43 @@ async function main() {
     select: { id: true, email: true },
   });
 
-  // ถ้ามีระบบ Role/AdminUserRole ใน schema: ผูก superadmin ให้เลย (ถ้าไม่มีจะข้าม)
+  // minimum RBAC for dashboard/admin APIs
   try {
+    const manageBots = await prisma.permission.upsert({
+      where: { name: "manageBots" },
+      update: { description: "Manage bots and secrets" },
+      create: { name: "manageBots", description: "Manage bots and secrets" },
+      select: { id: true },
+    });
+
+    const adminRole = await prisma.role.upsert({
+      where: { name: "Admin" },
+      update: {},
+      create: { name: "Admin", description: "Default admin role" },
+      select: { id: true },
+    });
+
+    await prisma.rolePermission.upsert({
+      where: {
+        roleId_permissionId: {
+          roleId: adminRole.id,
+          permissionId: manageBots.id,
+        },
+      },
+      update: {},
+      create: {
+        roleId: adminRole.id,
+        permissionId: manageBots.id,
+      },
+    });
+
+    await prisma.adminUserRole.upsert({
+      where: { adminId_roleId: { adminId: admin.id, roleId: adminRole.id } },
+      update: {},
+      create: { adminId: admin.id, roleId: adminRole.id },
+    });
+
+    // keep superadmin for compatibility
     const role = await prisma.role.upsert({
       where: { name: "superadmin" },
       update: {},
@@ -35,7 +71,18 @@ async function main() {
     // schema ไม่มี role tables ก็ไม่เป็นไร (ล็อกอินได้อยู่)
   }
 
-  console.log("[seedDev] OK:", { email: admin.email, adminId: admin.id });
+  await prisma.bot.upsert({
+    where: { tenant_name: { tenant, name: "admin-bot-001" } },
+    update: {},
+    create: { tenant, name: "admin-bot-001", platform: "line", active: true },
+    select: { id: true },
+  });
+
+  console.log("[seedDev] OK:", {
+    email: admin.email,
+    adminId: admin.id,
+    tenant,
+  });
 }
 
 main()

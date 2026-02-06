@@ -1,8 +1,9 @@
 // src/components/ProtectedRoute.tsx
 import { Navigate } from "react-router-dom";
+import { getToken } from "../lib/api";
 
 export default function ProtectedRoute({ children }: { children: JSX.Element }) {
-  const token = localStorage.getItem("bn9_jwt");
+  const token = getToken();
   if (!token) return <Navigate to="/login" replace />;
   return children;
 }

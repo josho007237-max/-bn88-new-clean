@@ -16,6 +16,9 @@
 2. Both projects share `npm install` in their folders, but `start-dev.ps1` already runs `npm run dev` for each.
 3. Visit `http://localhost:5555` to access the dashboard; API requests go through the Vite proxy to the backend on 3000.
 
+## PowerShell: ห้ามใช้ $pid ให้ใช้ $procId
+- ใช้ตัวแปร `$procId` แทน `$pid` เพราะ `$PID` เป็นตัวแปรอัตโนมัติของ PowerShell
+
 ## Admin login helpers
 - Default admin credentials (see `bn88-backend-v12/.env.example`):
   ```

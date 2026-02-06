@@ -6,15 +6,56 @@ process.on("uncaughtException", (err) =>
   console.error("[UNCAUGHT EXCEPTION]", err)
 );
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import dotenv from "dotenv";
-dotenv.config();
+const envCandidates = [
+  path.resolve(process.cwd(), ".env"),
+  path.resolve(process.cwd(), "bn88-backend-v12/.env"),
+];
+const envPath = envCandidates.find((p) => fs.existsSync(p));
+dotenv.config(envPath ? { path: envPath } : undefined);
+
+function detectDuplicateEnvKeys(filePath: string) {
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const lines = raw.split(/\r?\n/);
+    const lineMap = new Map<string, number[]>();
+    const keyPattern = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const match = line.match(keyPattern);
+      if (!match?.[1]) continue;
+      const key = match[1];
+      const prev = lineMap.get(key) ?? [];
+      prev.push(i + 1);
+      lineMap.set(key, prev);
+    }
+
+    for (const [key, rows] of lineMap.entries()) {
+      if (rows.length <= 1) continue;
+      console.error(
+        `[BOOT][ENV_DUPLICATE] key "${key}" appears ${rows.length} times in ${filePath} (lines: ${rows.join(", ")})`
+      );
+    }
+  } catch (err) {
+    console.warn("[BOOT][ENV_CHECK_WARN] cannot read env file", filePath, err);
+  }
+}
+
+if (envPath) {
+  detectDuplicateEnvKeys(envPath);
+} else {
+  console.warn("[BOOT][ENV_WARN] .env file not found from cwd");
+}
 
 import express, {
   type Request,
   type Response,
   type NextFunction,
 } from "express";
-import * as path from "node:path";
 import cors from "cors";
 import morgan from "morgan";
 import helmet from "helmet";
@@ -98,25 +139,30 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.use("/api/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 /* ---------- Body parsers ---------- */
-/**
- * ✅ LINE ต้องใช้ raw body เพื่อ verify signature
- * ต้องอยู่ก่อน express.json()
- */
+/* parsers ทั่วไป + เก็บ raw bytes เฉพาะ LINE webhook (Ticket 04) */
 app.use(
   "/api/webhooks/line",
-  express.raw({
-    type: "application/json",
+  express.raw({ type: "*/*", limit: "1mb" }),
+  (req, _res, next) => {
+    if (Buffer.isBuffer(req.body)) {
+      (req as any).rawBody = req.body;
+    }
+    return next();
+  }
+);
+app.use(
+  express.json({
+    limit: "1mb",
     verify: (req, _res, buf) => {
-      (req as any).rawBody = buf;
+      if (
+        req.originalUrl &&
+        req.originalUrl.startsWith("/api/webhooks/line")
+      ) {
+        (req as any).rawBody = buf;
+      }
     },
   })
 );
-
-/* parsers ทั่วไป (ยกเว้น LINE webhook เพื่อคง raw body ไว้) */
-app.use((req, res, next) => {
-  if (req.path.startsWith("/api/webhooks/line")) return next();
-  return express.json({ limit: "1mb" })(req, res, next);
-});
 app.use((req, res, next) => {
   if (req.path.startsWith("/api/webhooks/line")) return next();
   return express.urlencoded({ extended: false, limit: "200kb" })(
@@ -277,16 +323,26 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 const HOST = (process.env.HOST || "0.0.0.0").trim() || "0.0.0.0";
 const PORT_ENV = (process.env.PORT || "").trim();
 const PORT = Number(PORT_ENV || config.PORT || 3000);
-const REDIS_URL =
-  process.env.REDIS_URL ||
-  (process.env.REDIS_PORT ? `redis://127.0.0.1:${process.env.REDIS_PORT}` : "");
+const REDIS_URL = String(process.env.REDIS_URL || "").trim() || "redis://127.0.0.1:6380";
 const REDIS_PORT = process.env.REDIS_PORT || "";
 
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log(
     `[BOOT] listening on http://${HOST}:${PORT} (PORT env=${PORT_ENV || "n/a"})`
   );
+  console.log(`redis connecting to ${REDIS_URL}`);
   console.log("[env]", { HOST, PORT, REDIS_URL, REDIS_PORT });
+});
+
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err?.code === "EADDRINUSE") {
+    console.error(`[BOOT][ERROR] Port ${PORT} is in use`);
+    console.error("[BOOT][HINT] Run: npm run port:3000");
+    console.error("[BOOT][HINT] Then free port quickly: npm run port:3000:kill");
+    process.exit(1);
+  }
+  console.error("[BOOT][ERROR] server listen failed", err);
+  process.exit(1);
 });
 
 export default app;

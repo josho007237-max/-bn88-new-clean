@@ -47,8 +47,9 @@ import {
   createEngagementMessage,
   updateEngagementMessage,
   deleteEngagementMessage,
-  getLineContentBlob,
   getToken,
+  TENANT,
+  fetchLineContentObjectUrl as fetchLineContentObjectUrlViaApi,
   downloadObjectUrl,
 } from "../lib/api";
 
@@ -381,6 +382,7 @@ const ChatCenter: React.FC = () => {
 
   const [error, setError] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<MetricsSnapshot | null>(null);
+  const [sseToken, setSseToken] = useState(getToken());
 
   const [liveStreams, setLiveStreams] = useState<LiveStream[]>([]);
   const [liveForm, setLiveForm] = useState({
@@ -422,24 +424,36 @@ const ChatCenter: React.FC = () => {
     "line"
   );
 
+  useEffect(() => {
+    const onTokenChange = () => setSseToken(getToken());
+    window.addEventListener("bn9:token-changed", onTokenChange);
+    return () => window.removeEventListener("bn9:token-changed", onTokenChange);
+  }, []);
+
   // รูป preview overlay
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   // map รูป (LINE) ที่โหลดเป็น blob แล้ว
   const [imgUrlMap, setImgUrlMap] = useState<Record<string, string>>({});
+  const [imgErrorMap, setImgErrorMap] = useState<Record<string, string>>({});
   const imgUrlCreatedRef = useRef<Record<string, string>>({});
-  const fetchLineImageUrl = useCallback(async (messageId: string) => {
-    const blob = await getLineContentBlob(messageId);
-    return URL.createObjectURL(blob);
-  }, []);
+  const fetchLineContentObjectUrl = useCallback(
+    async (messageId: string): Promise<string> => {
+      const { url } = await fetchLineContentObjectUrlViaApi(messageId);
+      return url;
+    },
+    []
+  );
 
   // map ไฟล์ (LINE) ที่โหลดเป็น blob แล้ว
   const [fileUrlMap, setFileUrlMap] = useState<Record<string, string>>({});
   const fileUrlCreatedRef = useRef<Record<string, string>>({});
-  const fetchLineFileUrl = useCallback(async (messageId: string) => {
-    const blob = await getLineContentBlob(messageId);
-    return URL.createObjectURL(blob);
-  }, []);
+  const fetchLineFileUrl = useCallback(
+    async (m: ChatMessage) => {
+      return fetchLineContentObjectUrl(m.id);
+    },
+    [fetchLineContentObjectUrl]
+  );
 
   // ล้าง objectURL เก่าทุกครั้งที่เปลี่ยน session (กัน memory leak + กันรูปค้าง)
   useEffect(() => {
@@ -454,6 +468,7 @@ const ChatCenter: React.FC = () => {
       return {};
     });
     imgUrlCreatedRef.current = {};
+    setImgErrorMap({});
     setFileUrlMap((prev) => {
       Object.values(prev).forEach((u) => {
         try {
@@ -487,7 +502,7 @@ const ChatCenter: React.FC = () => {
     };
   }, []);
 
-  const tenant = import.meta.env.VITE_TENANT || "bn9";
+  const tenant = TENANT;
   const apiBase = getApiBase();
 
   // ช่องค้นหา sessions
@@ -652,14 +667,26 @@ const ChatCenter: React.FC = () => {
         const t = ((m.type as string) || (m as any).messageType || "TEXT")
           .toString()
           .toUpperCase();
-        return t === "IMAGE";
+        if (t !== "IMAGE") return false;
+        const plat = (
+          m.platform ||
+          m.session?.platform ||
+          selectedSession?.platform ||
+          ""
+        )
+          .toString()
+          .toLowerCase();
+        return (
+          plat === "line" ||
+          String(m.attachmentUrl || "").includes("/line-content/")
+        );
       });
 
       for (const m of imageMsgs) {
         if (imgUrlCreatedRef.current[m.id]) continue;
 
         try {
-          const url = await fetchLineImageUrl(m.id);
+          const url = await fetchLineContentObjectUrl(m.id);
 
           if (cancelled) {
             URL.revokeObjectURL(url);
@@ -668,8 +695,19 @@ const ChatCenter: React.FC = () => {
 
           imgUrlCreatedRef.current[m.id] = url;
           setImgUrlMap((prev) => ({ ...prev, [m.id]: url }));
+          setImgErrorMap((prev) => {
+            if (!prev[m.id]) return prev;
+            const next = { ...prev };
+            delete next[m.id];
+            return next;
+          });
         } catch (e) {
           console.warn("load image blob failed", m.id, e);
+          const match = String((e as Error)?.message || "").match(/:(\d{3})$/);
+          setImgErrorMap((prev) => ({
+            ...prev,
+            [m.id]: match?.[1] ?? "ERR",
+          }));
         }
       }
     };
@@ -679,7 +717,11 @@ const ChatCenter: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [messages]);
+  }, [
+    messages,
+    selectedSession?.platform,
+    fetchLineContentObjectUrl,
+  ]);
 
   /* -------------------- โหลด sessions ตามบอทที่เลือกอยู่ -------------------- */
   useEffect(() => {
@@ -731,8 +773,15 @@ const ChatCenter: React.FC = () => {
     if (!ENABLE_SSE) return;
     if (!tenant) return;
 
-    const token = getToken();
-    if (!token) return;
+    const token = sseToken;
+    if (!token) {
+      const w = window as any;
+      try {
+        w.__CHAT_SSE__?.close?.();
+      } catch { }
+      w.__CHAT_SSE__ = null;
+      return;
+    }
 
     const base = apiBase.replace(/\/$/, "");
     const url =
@@ -746,7 +795,7 @@ const ChatCenter: React.FC = () => {
     // ปิดตัวเก่าก่อน (จะเกิดตอน tenant/apiBase เปลี่ยน)
     try {
       w.__CHAT_SSE__?.close?.();
-    } catch {}
+    } catch { }
     w.__CHAT_SSE__ = null;
 
     const es = new EventSource(url);
@@ -866,10 +915,10 @@ const ChatCenter: React.FC = () => {
     return () => {
       try {
         es.close();
-      } catch {}
+      } catch { }
       if (w.__CHAT_SSE__ === es) w.__CHAT_SSE__ = null;
     };
-  }, [apiBase, tenant]);
+  }, [apiBase, tenant, sseToken]);
 
   /* ----------------------------- handlers ----------------------------- */
   function handleSelectSession(s: ChatSession) {
@@ -882,28 +931,10 @@ const ChatCenter: React.FC = () => {
     void fetchMessages(s.id);
   }
   const getAuthHeaders = () => {
-    const rawToken =
-      localStorage.getItem("token") ||
-      localStorage.getItem("accessToken") ||
-      localStorage.getItem("authToken") ||
-      "";
-
-    const token =
-      rawToken && rawToken.startsWith("Bearer ")
-        ? rawToken
-        : rawToken
-          ? `Bearer ${rawToken}`
-          : "";
-
-    const tenantId =
-      localStorage.getItem("tenantId") ||
-      localStorage.getItem("x-tenant") ||
-      localStorage.getItem("tenant") ||
-      "";
-
     const h: Record<string, string> = {};
-    if (token) h["Authorization"] = token;
-    if (tenantId) h["x-tenant"] = tenantId;
+    const token = getToken();
+    if (token) h["Authorization"] = `Bearer ${token}`;
+    if (TENANT) h["x-tenant"] = TENANT;
     return h;
   };
 
@@ -1096,10 +1127,10 @@ const ChatCenter: React.FC = () => {
         inlineKeyboard:
           richPlatform === "telegram"
             ? richInlineKeyboard
-                .map((row) =>
-                  row.filter((b) => b.text.trim() && b.callbackData.trim())
-                )
-                .filter((row) => row.length > 0)
+              .map((row) =>
+                row.filter((b) => b.text.trim() && b.callbackData.trim())
+              )
+              .filter((row) => row.length > 0)
             : undefined,
       };
 
@@ -1281,9 +1312,9 @@ const ChatCenter: React.FC = () => {
         answer: faqForm.answer.trim(),
         keywords: faqForm.keywords
           ? faqForm.keywords
-              .split(",")
-              .map((k) => k.trim())
-              .filter(Boolean)
+            .split(",")
+            .map((k) => k.trim())
+            .filter(Boolean)
           : [],
       };
 
@@ -1616,11 +1647,10 @@ const ChatCenter: React.FC = () => {
         type="button"
         onClick={() => setMainTab(id)}
         aria-label={`เปิดแท็บ ${label}`}
-        className={`px-3 py-2 rounded-lg border text-xs transition ${
-          active
+        className={`px-3 py-2 rounded-lg border text-xs transition ${active
             ? "border-emerald-500/70 bg-emerald-500/10 text-emerald-100"
             : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800/60"
-        }`}
+          }`}
       >
         {label}
       </button>
@@ -1747,9 +1777,8 @@ const ChatCenter: React.FC = () => {
                       key={s.id}
                       type="button"
                       onClick={() => handleSelectSession(s)}
-                      className={`w-full text-left px-4 py-3 border-b border-zinc-800 text-sm hover:bg-zinc-800/60 ${
-                        isActive ? "bg-zinc-800/80" : ""
-                      }`}
+                      className={`w-full text-left px-4 py-3 border-b border-zinc-800 text-sm hover:bg-zinc-800/60 ${isActive ? "bg-zinc-800/80" : ""
+                        }`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="font-medium truncate">
@@ -1890,11 +1919,10 @@ const ChatCenter: React.FC = () => {
                         setSelectedConversationId(c.conversationId);
                         setConversationPage(1);
                       }}
-                      className={`px-3 py-2 rounded-lg border text-left text-[11px] min-w-[180px] transition ${
-                        isActive
+                      className={`px-3 py-2 rounded-lg border text-left text-[11px] min-w-[180px] transition ${isActive
                           ? "border-emerald-500/70 bg-emerald-500/10 text-emerald-100"
                           : "border-zinc-700 bg-zinc-900 text-zinc-200"
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-xs">
@@ -1985,8 +2013,12 @@ const ChatCenter: React.FC = () => {
                 if (msgType === "TEXT") {
                   content = m.text || "";
                 } else if (msgType === "IMAGE") {
-                  if (plat === "line") {
+                  const isLineContent =
+                    plat === "line" ||
+                    String(m.attachmentUrl || "").includes("/line-content/");
+                  if (isLineContent) {
                     const imageUrl = imgUrlMap[m.id];
+                    const imageErr = imgErrorMap[m.id];
 
                     content = (
                       <div className="space-y-2">
@@ -1994,7 +2026,11 @@ const ChatCenter: React.FC = () => {
                           <div className="whitespace-pre-line">{m.text}</div>
                         )}
 
-                        {!imageUrl ? (
+                        {!imageUrl && imageErr === "401" ? (
+                          <div className="text-[11px] text-amber-300">
+                            โหลดรูปไม่ได้ (401)
+                          </div>
+                        ) : !imageUrl ? (
                           <div className="text-[11px] text-zinc-400">
                             กำลังโหลดรูป...
                           </div>
@@ -2053,7 +2089,10 @@ const ChatCenter: React.FC = () => {
                 } else if (msgType === "FILE") {
                   const fileName =
                     (m.attachmentMeta as any)?.fileName || "ไฟล์แนบ";
-                  if (plat === "line") {
+                  const isLineContent =
+                    plat === "line" ||
+                    String(m.attachmentUrl || "").includes("/line-content/");
+                  if (isLineContent) {
                     const fileUrl = fileUrlMap[m.id];
                     const handleOpenLineFile = async (
                       ev: React.MouseEvent<HTMLAnchorElement>
@@ -2064,7 +2103,7 @@ const ChatCenter: React.FC = () => {
                       let url = fileUrlCreatedRef.current[m.id];
                       if (!url) {
                         try {
-                          url = await fetchLineFileUrl(m.id);
+                          url = await fetchLineFileUrl(m);
                           fileUrlCreatedRef.current[m.id] = url;
                           setFileUrlMap((prev) => ({ ...prev, [m.id]: url }));
                         } catch (e) {
@@ -2131,9 +2170,9 @@ const ChatCenter: React.FC = () => {
 
                 const sessionLabel = isSearchMode
                   ? m.session?.displayName ||
-                    m.session?.userId ||
-                    m.session?.id ||
-                    ""
+                  m.session?.userId ||
+                  m.session?.id ||
+                  ""
                   : null;
 
                 return (
@@ -2534,22 +2573,20 @@ const ChatCenter: React.FC = () => {
               <div className="flex gap-2">
                 <button
                   type="button"
-                  className={`px-3 py-2 rounded-lg border text-xs ${
-                    previewPlatform === "line"
+                  className={`px-3 py-2 rounded-lg border text-xs ${previewPlatform === "line"
                       ? "border-emerald-500/70 bg-emerald-500/10 text-emerald-100"
                       : "border-zinc-700 bg-zinc-900 text-zinc-200"
-                  }`}
+                    }`}
                   onClick={() => setPreviewPlatform("line")}
                 >
                   Preview LINE
                 </button>
                 <button
                   type="button"
-                  className={`px-3 py-2 rounded-lg border text-xs ${
-                    previewPlatform === "telegram"
+                  className={`px-3 py-2 rounded-lg border text-xs ${previewPlatform === "telegram"
                       ? "border-emerald-500/70 bg-emerald-500/10 text-emerald-100"
                       : "border-zinc-700 bg-zinc-900 text-zinc-200"
-                  }`}
+                    }`}
                   onClick={() => setPreviewPlatform("telegram")}
                 >
                   Preview Telegram
@@ -2577,8 +2614,8 @@ const ChatCenter: React.FC = () => {
               session:{" "}
               {selectedSession
                 ? selectedSession.displayName ||
-                  selectedSession.userId ||
-                  selectedSession.id
+                selectedSession.userId ||
+                selectedSession.id
                 : "-"}
             </div>
           </div>
@@ -2879,22 +2916,20 @@ const ChatCenter: React.FC = () => {
               <div className="flex gap-2">
                 <button
                   type="button"
-                  className={`px-3 py-2 rounded-lg border text-xs ${
-                    liveTab === "qna"
+                  className={`px-3 py-2 rounded-lg border text-xs ${liveTab === "qna"
                       ? "border-emerald-500/70 bg-emerald-500/10 text-emerald-100"
                       : "border-zinc-700 bg-zinc-900 text-zinc-200"
-                  }`}
+                    }`}
                   onClick={() => setLiveTab("qna")}
                 >
                   QnA
                 </button>
                 <button
                   type="button"
-                  className={`px-3 py-2 rounded-lg border text-xs ${
-                    liveTab === "polls"
+                  className={`px-3 py-2 rounded-lg border text-xs ${liveTab === "polls"
                       ? "border-emerald-500/70 bg-emerald-500/10 text-emerald-100"
                       : "border-zinc-700 bg-zinc-900 text-zinc-200"
-                  }`}
+                    }`}
                   onClick={() => setLiveTab("polls")}
                 >
                   Polls

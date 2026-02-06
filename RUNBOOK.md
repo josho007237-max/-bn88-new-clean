@@ -20,6 +20,9 @@ npm run dev
 docker compose up -d redis
 ```
 
+## PowerShell: ห้ามใช้ $pid ให้ใช้ $procId
+- ใช้ตัวแปร `$procId` แทน `$pid` เพราะ `$PID` เป็นตัวแปรอัตโนมัติของ PowerShell
+
 ## Health checks
 ```powershell
 curl http://localhost:3000/health

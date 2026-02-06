@@ -21,13 +21,13 @@ export type BotsResp = { ok: boolean; items: BotRow[] };
 
 export const auth = {
   get token() {
-    return localStorage.getItem("BN9_ADMIN_JWT") || "";
+    return localStorage.getItem("bn9_jwt") || "";
   },
   set token(v: string) {
-    localStorage.setItem("bn9.admin.token", v);
+    localStorage.setItem("bn9_jwt", v);
   },
   clear() {
-    localStorage.removeItem("BN9_ADMIN_JWT");
+    localStorage.removeItem("bn9_jwt");
   },
 };
 
@@ -50,9 +50,9 @@ async function j<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function login(email: string, password: string) {
-  const res = await fetch(`${BASE}/api/auth/login`, {
+  const res = await fetch(`${BASE}/admin/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-tenant": TENANT },
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) throw new Error(`login_failed: ${res.status}`);
@@ -62,14 +62,14 @@ export async function login(email: string, password: string) {
 }
 
 export async function listBots() {
-  return j<BotsResp>("/api/admin/bots");
+  return j<BotsResp>("/admin/bots");
 }
 
 export async function createBot(
   name: string,
   provider: "line" | "telegram" | "facebook" = "line"
 ) {
-  return j<{ ok: boolean; id: string }>("/api/admin/bots", {
+  return j<{ ok: boolean; id: string }>("/admin/bots", {
     method: "POST",
     body: JSON.stringify({ name, provider, isActive: true }),
   });
@@ -81,7 +81,7 @@ export async function saveLineSecrets(
   channelAccessToken: string
 ) {
   return j<{ ok: boolean; botId: string; saved: boolean }>(
-    `/api/admin/bots/${encodeURIComponent(botId)}/secrets`,
+    `/admin/bots/${encodeURIComponent(botId)}/secrets`,
     {
       method: "PUT",
       body: JSON.stringify({ channelSecret, channelAccessToken }),
@@ -90,5 +90,5 @@ export async function saveLineSecrets(
 }
 
 export async function health() {
-  return j<{ ok: boolean; time: string; adminApi?: boolean }>("/api/health");
+  return j<{ ok: boolean; time: string; adminApi?: boolean }>("/health");
 }
