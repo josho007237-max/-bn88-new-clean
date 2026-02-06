@@ -615,12 +615,12 @@ This section adds a ManyChat-like flow engine that supports Quick Replies with *
 
 ## 10. ManyChat-style Flow Engine (Quick Replies + Follow-up/Retry + Session State) — Multi-channel (LINE/Telegram/Messenger/Webchat)
 
-- [x] Status: ⚙️ Implementation in progress
+- [x] Status: ✅ **IMPLEMENTED & PUSHED** (commit 6f509f6)
   - ✅ Prisma model: `QuickReplySession` (created + migrated)
   - ✅ Core engine: `types.ts`, `delay.ts`, `session.store.ts`, `engine.ts`, `followup.worker.ts`
-  - ⏳ LINE adapter: pending (will implement quick replies payload + postback parsing)
-  - ⏳ Webhook integration: pending (hook into LINE webhook route)
-  - ⏳ Worker scheduling: pending (add followup worker to queue/scheduler)
+  - ✅ LINE adapter: `adapters/line.ts` (send QR, parse postback, send follow-up)
+  - ✅ Webhook integration: postback (qrs:sessionId:choiceId) + message (QR retry) handlers
+  - ⏳ Worker scheduling: follow-up worker ready (`src/quickreplies/followup.worker.ts`) — integrate into scheduler next
 
 This section adds a ManyChat-like flow engine to the platform with **Follow-up**, **Retry**, and **QuickReply session state**. The design is additive: a single core engine controls behavior, while channel adapters map payload formats. This preserves the existing backend APIs and phase structure, and can be adopted incrementally starting with LINE.
 
