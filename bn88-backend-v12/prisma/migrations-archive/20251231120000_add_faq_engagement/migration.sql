@@ -1,3 +1,7 @@
+/*
+NOTE: This migration is superseded by earlier FAQ/engagement migrations.
+It is kept for history but disabled to avoid duplicate table creation.
+
 -- CreateTable
 CREATE TABLE "FaqEntry" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -32,3 +36,4 @@ CREATE TABLE "EngagementMessage" (
 -- Indexes
 CREATE INDEX "FaqEntry_bot_enabled" ON "FaqEntry"("botId", "enabled");
 CREATE INDEX "EngagementMessage_channel" ON "EngagementMessage"("botId", "platform", "channelId");
+*/

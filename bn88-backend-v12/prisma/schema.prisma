@@ -8,6 +8,31 @@ datasource db {
 }
 
 /**
+ * ====================== Tenants & Audit ===========================
+ */
+
+model Tenant {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id               String   @id @default(cuid())
+  tenant           String
+  actorAdminUserId String?
+  action           String
+  target           String?
+  diffJson         Json?
+  createdAt        DateTime @default(now())
+
+  @@index([tenant, createdAt])
+}
+
+/**
  * ====================== Admin & Core Bot Models ======================
  */
 
@@ -51,6 +76,45 @@ model AdminUserRole {
   assignedAt DateTime  @default(now())
 
   @@id([adminId, roleId])
+}
+
+/**
+ * ====================== Webhook & Media ===========================
+ */
+
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  tenant      String
+  provider    String
+  eventId     String
+  signatureOk Boolean  @default(false)
+  receivedAt  DateTime @default(now())
+  rawJson     Json?
+  createdAt   DateTime @default(now())
+
+  @@unique([tenant, provider, eventId], name: "webhook_event_unique")
+  @@index([tenant, provider, receivedAt])
+}
+
+model MediaAsset {
+  id            String   @id @default(cuid())
+  tenant        String
+  provider      String
+  contentId     String
+  mimeType      String?
+  size          Int?
+  storageKey    String?
+  sha256        String?
+  sessionId     String?
+  chatMessageId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  session ChatSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  message ChatMessage? @relation(fields: [chatMessageId], references: [id], onDelete: SetNull)
+
+  @@unique([tenant, provider, contentId], name: "media_tenant_provider_content_unique")
+  @@index([tenant, provider])
 }
 
 model RolePermission {
@@ -429,6 +493,7 @@ model ChatSession {
 
   messages ChatMessage[]
   cases    CaseItem[]
+  mediaAssets MediaAsset[]
 
   createdAt    DateTime      @default(now())
   imageIntakes ImageIntake[]
@@ -479,6 +544,7 @@ model ChatMessage {
 
   createdAt    DateTime      @default(now())
   imageIntakes ImageIntake[]
+  mediaAssets  MediaAsset[]
 
   @@unique([sessionId, platformMessageId], map: "ChatMessage_session_platformMsg_unique")
   @@index([sessionId, createdAt], map: "ChatMessage_bySession")
@@ -643,6 +709,45 @@ model CampaignUserProgress {
   updatedAt      DateTime @updatedAt
 
   @@index([tenant, botId, userId, taskCode])
+}
+
+/**
+ * ====================== ManyChat-style Quick Replies ==================
+ */
+
+model QuickReplySession {
+  id String @id @default(cuid())
+
+  // Contact & Channel
+  channel   String // "line" | "telegram" | "messenger" | "webchat"
+  contactId String // userId / chatId / psid / sessionId
+  promptKey String // flow node id
+
+  // Status
+  status String @default("pending") // "pending" | "resolved" | "expired"
+
+  // Message ID (if returned by channel API)
+  messageId String?
+
+  // Selected choice (when resolved)
+  selectedChoiceId String?
+
+  // Follow-up settings
+  followupDelayMs    BigInt?
+  followupDueAtMs    BigInt?
+  followupSentAtMs   BigInt?
+
+  // Retry settings
+  retryMax   Int @default(0) // capped at 5
+  retryCount Int @default(0)
+
+  // Timestamps
+  createdAtMs   BigInt
+  resolvedAtMs  BigInt?
+
+  @@unique([channel, contactId, promptKey, createdAtMs])
+  @@index([status, followupDueAtMs])
+  @@index([channel, contactId, createdAtMs])
 }
 
 enum CampaignScheduleStatus {

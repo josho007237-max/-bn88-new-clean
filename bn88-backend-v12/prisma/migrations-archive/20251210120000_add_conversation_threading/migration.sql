@@ -1,3 +1,7 @@
+/*
+NOTE: This migration is superseded by earlier conversation changes.
+It is kept for history but disabled to avoid duplicate table creation.
+
 -- CreateTable
 CREATE TABLE "Conversation" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -49,3 +53,4 @@ CREATE INDEX "ChatMessage_bySession" ON "ChatMessage"("sessionId", "createdAt");
 CREATE INDEX "ChatMessage_byConversation" ON "ChatMessage"("conversationId", "createdAt");
 PRAGMA foreign_key_check;
 PRAGMA foreign_keys=ON;
+*/

@@ -14,6 +14,12 @@ import { createRequestLogger, getRequestId } from "../../utils/logger";
 import { sseHub } from "../../lib/sseHub";
 import { processActivityImageMessage } from "../../services/activity/processActivityImageMessage.js";
 import { buildQuickReplyMenu } from "../../line/quickReply";
+// QR imports
+import {
+  onQuickReplySelected,
+  onUserFreeText,
+} from "../../quickreplies/engine";
+import { parseQRPostback } from "../../quickreplies/adapters/line";
 
 const router = Router();
 const TENANT_DEFAULT = process.env.TENANT_DEFAULT || "bn9";
@@ -54,8 +60,14 @@ export function getRawBody(req: Request): Buffer | null {
   return null;
 }
 
-export function createLineSignature(raw: Buffer, channelSecret: string): string {
-  return crypto.createHmac("sha256", channelSecret).update(raw).digest("base64");
+export function createLineSignature(
+  raw: Buffer,
+  channelSecret: string,
+): string {
+  return crypto
+    .createHmac("sha256", channelSecret)
+    .update(raw)
+    .digest("base64");
 }
 
 /* ------------------------------------------------------------------ */
@@ -89,6 +101,7 @@ type LineEvent = {
   timestamp: number;
   source?: LineSource;
   message?: LineMessage;
+  webhookEventId?: string;
 };
 
 type LineWebhookBody = {
@@ -186,6 +199,41 @@ export function mapLineMessage(m?: LineMessage): NormalizedLineMessage | null {
   };
 }
 
+function buildLineEventId(ev: LineEvent): string {
+  const raw = ev.webhookEventId || ev.message?.id || ev.replyToken || "";
+  if (raw) return String(raw).trim();
+
+  const src = ev.source || {};
+  const srcKey = src.userId || src.groupId || src.roomId || "unknown";
+  return `${ev.type}:${srcKey}:${ev.timestamp}`;
+}
+
+async function recordWebhookEvent(args: {
+  tenant: string;
+  provider: string;
+  eventId: string;
+  signatureOk: boolean;
+  receivedAt: Date;
+  rawJson: unknown;
+}): Promise<boolean> {
+  try {
+    await prisma.webhookEvent.create({
+      data: {
+        tenant: args.tenant,
+        provider: args.provider,
+        eventId: args.eventId,
+        signatureOk: args.signatureOk,
+        receivedAt: args.receivedAt,
+        rawJson: args.rawJson as any,
+      },
+    });
+    return true;
+  } catch (err: any) {
+    if (err?.code === "P2002") return false;
+    throw err;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Bot resolver (หา bot + secrets สำหรับ LINE)                         */
 /* ------------------------------------------------------------------ */
@@ -245,7 +293,7 @@ type LineSendMessage =
 async function lineReply(
   replyToken: string,
   channelAccessToken: string,
-  messages: LineSendMessage[]
+  messages: LineSendMessage[],
 ): Promise<boolean> {
   const resp = await fetch("https://api.line.me/v2/bot/message/reply", {
     method: "POST",
@@ -273,20 +321,20 @@ async function lineReply(
 
 async function fetchLineMessageContentBuffer(
   messageId: string,
-  channelAccessToken: string
+  channelAccessToken: string,
 ): Promise<{ buf: Buffer; mime: string }> {
   const resp = await fetch(
     `https://api-data.line.me/v2/bot/message/${messageId}/content`,
     {
       method: "GET",
       headers: { Authorization: `Bearer ${channelAccessToken}` },
-    }
+    },
   );
 
   if (!resp.ok) {
     const t = await resp.text().catch(() => "");
     throw new Error(
-      `LINE content fetch failed: ${resp.status} ${resp.statusText} ${t}`
+      `LINE content fetch failed: ${resp.status} ${resp.statusText} ${t}`,
     );
   }
 
@@ -338,7 +386,7 @@ function clamp01(n: number) {
 
 async function classifyImageBuffer(
   buf: Buffer,
-  mime: string
+  mime: string,
 ): Promise<VisionResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return { classification: IMAGE_CLASS.OTHER, confidence: 0 };
@@ -507,7 +555,11 @@ export async function handleLineWebhook(req: Request, res: Response) {
         ? (req.headers["x-tenant"] as string)
         : "";
     const tenantResolved =
-      tenantQuery || tenantParam || tenantHeader || config.TENANT_DEFAULT || TENANT_DEFAULT;
+      tenantQuery ||
+      tenantParam ||
+      tenantHeader ||
+      config.TENANT_DEFAULT ||
+      TENANT_DEFAULT;
 
     const botIdQuery =
       typeof req.query.botId === "string" ? (req.query.botId as string) : "";
@@ -575,44 +627,93 @@ export async function handleLineWebhook(req: Request, res: Response) {
     }
     const platform: SupportedPlatform = "line";
     const results: Array<Record<string, unknown>> = [];
-    
 
     for (const ev of events) {
+      const eventId = buildLineEventId(ev);
+      try {
+        const inserted = await recordWebhookEvent({
+          tenant,
+          provider: "line",
+          eventId,
+          signatureOk: true,
+          receivedAt: new Date(ev.timestamp),
+          rawJson: ev,
+        });
+        if (!inserted) {
+          results.push({ skipped: true, reason: "duplicate_event", eventId });
+          continue;
+        }
+      } catch (err) {
+        log.error({ err, eventId }, "line_webhook_event_record_failed");
+      }
+
       // -------------------- POSTBACK (Quick Reply / Rich Menu) --------------------
-if (ev.type === "postback") {
-  const replyToken = ev.replyToken;
-  if (!replyToken) {
-    results.push({ skipped: true, reason: "postback_no_replyToken" });
-    continue;
-  }
+      if (ev.type === "postback") {
+        const replyToken = ev.replyToken;
+        if (!replyToken) {
+          results.push({ skipped: true, reason: "postback_no_replyToken" });
+          continue;
+        }
 
-  const rawData = String((ev as any).postback?.data ?? "");
-  const qs = new URLSearchParams(rawData);
+        const rawData = String((ev as any).postback?.data ?? "");
+        const qs = new URLSearchParams(rawData);
 
-  const c = qs.get("case"); // case=deposit | withdraw | kyc
+        // ========== QR HANDLING ==========
+        const qrParse = parseQRPostback(rawData);
+        if (qrParse) {
+          try {
+            await onQuickReplySelected(qrParse.sessionId, qrParse.choiceId);
+            log.info(
+              { sessionId: qrParse.sessionId, choiceId: qrParse.choiceId },
+              "qr_selected",
+            );
+            results.push({
+              ok: true,
+              kind: "qr_selected",
+              sessionId: qrParse.sessionId,
+            });
+            continue;
+          } catch (err) {
+            log.error({ err, rawData }, "qr_select_failed");
+            results.push({
+              ok: false,
+              kind: "qr_select_error",
+              error: String(err),
+            });
+            continue;
+          }
+        }
+        // ========== END QR HANDLING ==========
 
-  if (c === "deposit" || c === "withdraw" || c === "kyc") {
-    const text =
-      c === "deposit"
-        ? "ฝากไม่เข้า: ขอ USER / เบอร์ / ชื่อ / ธนาคาร / เลขบัญชี / เวลา / แนบสลิป"
-        : c === "withdraw"
-        ? "ถอนไม่ได้: ขอ USER / เบอร์ / ธนาคาร / เลขบัญชี / แนบสลิป"
-        : "ยืนยันตัวตน: ขอชื่อ-นามสกุล / เบอร์ / รูปบัตร / รูปคู่บัตร";
+        const c = qs.get("case"); // case=deposit | withdraw | kyc
 
-    const quickReply = buildQuickReplyMenu("th", APP_BASE_URL);
+        if (c === "deposit" || c === "withdraw" || c === "kyc") {
+          const text =
+            c === "deposit"
+              ? "ฝากไม่เข้า: ขอ USER / เบอร์ / ชื่อ / ธนาคาร / เลขบัญชี / เวลา / แนบสลิป"
+              : c === "withdraw"
+                ? "ถอนไม่ได้: ขอ USER / เบอร์ / ธนาคาร / เลขบัญชี / แนบสลิป"
+                : "ยืนยันตัวตน: ขอชื่อ-นามสกุล / เบอร์ / รูปบัตร / รูปคู่บัตร";
 
-    const sent = await lineReply(replyToken, channelAccessToken, [
-      { type: "text", text, quickReply },
-    ]).catch(() => false);
+          const quickReply = buildQuickReplyMenu("th", APP_BASE_URL);
 
-    results.push({ ok: true, kind: "postback_case", case: c, replied: sent });
-    continue;
-  }
+          const sent = await lineReply(replyToken, channelAccessToken, [
+            { type: "text", text, quickReply },
+          ]).catch(() => false);
 
-  results.push({ ok: true, kind: "postback_other", data: rawData });
-  continue;
-}
-// ---------------------------------------------------------------------------
+          results.push({
+            ok: true,
+            kind: "postback_case",
+            case: c,
+            replied: sent,
+          });
+          continue;
+        }
+
+        results.push({ ok: true, kind: "postback_other", data: rawData });
+        continue;
+      }
+      // ---------------------------------------------------------------------------
 
       try {
         if (ev.type !== "message" || !ev.message) {
@@ -626,15 +727,32 @@ if (ev.type === "postback") {
           continue;
         }
 
-        const now = Date.now();
-        const PENDING_TTL_MS = 12 * 60 * 60 * 1000;
-
-        const channelKey = getChannelKeyFromSource(ev.source);
         const userId =
           ev.source?.userId ||
           ev.source?.groupId ||
           ev.source?.roomId ||
           "unknown";
+
+        // ========== QR RETRY HANDLING ==========
+        // If this is text/content and user has a pending QR, trigger retry
+        if (
+          mapped.messageType === MessageType.TEXT ||
+          mapped.messageType === MessageType.IMAGE
+        ) {
+          try {
+            await onUserFreeText("line", userId);
+            log.info({ userId }, "qr_retry_checked");
+          } catch (err) {
+            log.warn({ err, userId }, "qr_retry_error");
+            // Don't block message processing on QR errors
+          }
+        }
+        // ========== END QR RETRY HANDLING ==========
+
+        const now = Date.now();
+        const PENDING_TTL_MS = 12 * 60 * 60 * 1000;
+
+        const channelKey = getChannelKeyFromSource(ev.source);
         const displayName =
           ev.source?.userId || ev.source?.groupId || ev.source?.roomId;
 
@@ -708,7 +826,7 @@ if (ev.type === "postback") {
         const wantsActivityText = /ส่งกิจกรรม|กิจกรรม/i.test(text || "");
         const wantsImageQuestionText =
           /โปร|โปรโมชั่น|โบนัส|เว็บ|หน้าเว็บ|ตามรูป|ตามภาพ|รูปนี้|ภาพนี้|\?/i.test(
-            text || ""
+            text || "",
           );
 
         // 1) ส่งกิจกรรม -> ตั้งโหมด activity
@@ -811,7 +929,7 @@ if (ev.type === "postback") {
           try {
             const { buf, mime } = await fetchLineMessageContentBuffer(
               platformMessageId,
-              channelAccessToken
+              channelAccessToken,
             );
 
             const cls = await classifyImageBuffer(buf, mime);
@@ -1026,8 +1144,8 @@ if (ev.type === "postback") {
         let replySent = false;
         if (!isRetry && ev.replyToken && channelAccessToken && finalReply) {
           replySent = await lineReply(ev.replyToken, channelAccessToken, [
-  { type: "text", text: finalReply },
-]).catch(() => false);
+            { type: "text", text: finalReply },
+          ]).catch(() => false);
         }
 
         results.push({ ok: true, replied: replySent, intent, isIssue });

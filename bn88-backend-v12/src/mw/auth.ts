@@ -55,21 +55,18 @@ function getToken(req: Request): {
   if (rawHeader) {
     const lower = rawHeader.toLowerCase();
     if (lower.startsWith("bearer ")) {
-      return {
-        token: rawHeader.slice(7).trim(),
-        raw: rawHeader.trim(),
-        source: "header",
-        queryProvided: false,
-        queryAllowed: false,
-      };
+      const token = rawHeader.slice(7).trim();
+      const tokenLower = token.toLowerCase();
+      if (token && tokenLower !== "undefined" && tokenLower !== "null") {
+        return {
+          token,
+          raw: rawHeader.trim(),
+          source: "header",
+          queryProvided: false,
+          queryAllowed: false,
+        };
+      }
     }
-    return {
-      token: "",
-      raw: rawHeader.trim(),
-      source: "header",
-      queryProvided: false,
-      queryAllowed: false,
-    };
   }
 
   const queryToken = readQueryToken(req);

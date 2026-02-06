@@ -1,3 +1,7 @@
+/*
+NOTE: This migration is superseded by earlier/later migrations.
+It is kept for history but disabled to avoid duplicate table creation.
+
 -- CreateTable
 CREATE TABLE "AdminUser" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -315,7 +319,7 @@ CREATE TABLE "EngagementMessage" (
 );
 
 -- CreateTable
-CREATE TABLE "CampaignSchedule" (
+CREATE TABLE IF NOT EXISTS "CampaignSchedule" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "campaignId" TEXT NOT NULL,
     "cronExpr" TEXT NOT NULL,
@@ -407,7 +411,8 @@ CREATE INDEX "FAQ_botId" ON "FAQ"("botId");
 CREATE INDEX "EngagementMessage_channel" ON "EngagementMessage"("botId", "platform", "channelId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "CampaignSchedule_idempotencyKey_key" ON "CampaignSchedule"("idempotencyKey");
+CREATE UNIQUE INDEX IF NOT EXISTS "CampaignSchedule_idempotencyKey_key" ON "CampaignSchedule"("idempotencyKey");
 
 -- CreateIndex
-CREATE INDEX "CampaignSchedule_campaignId" ON "CampaignSchedule"("campaignId");
+CREATE INDEX IF NOT EXISTS "CampaignSchedule_campaignId" ON "CampaignSchedule"("campaignId");
+*/

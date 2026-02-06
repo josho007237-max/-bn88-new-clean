@@ -34,6 +34,14 @@ export type CampaignScheduleJob = {
 
 let queueInstance: Queue<CampaignScheduleJob> | null = null;
 let workerStarted = false;
+let heartbeatTimer: NodeJS.Timeout | null = null;
+
+function startHeartbeat() {
+  if (heartbeatTimer) return;
+  heartbeatTimer = setInterval(() => {
+    redisLog.info("[campaign.queue] heartbeat", { queue: queueName });
+  }, 60_000);
+}
 
 function getQueue() {
   if (!redisEnabled) {
@@ -142,6 +150,7 @@ export function startCampaignScheduleWorker() {
       if (redisConnectedLogged) return;
       redisConnectedLogged = true;
       redisLog.info("redis connected");
+      startHeartbeat();
     });
 
     worker.on("failed", (job, err) => {

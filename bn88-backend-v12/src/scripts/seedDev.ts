@@ -11,6 +11,12 @@ async function main() {
 
   const hash = await bcrypt.hash(password, 10);
 
+  await prisma.tenant.upsert({
+    where: { code: tenant },
+    update: { name: tenant, status: "active" },
+    create: { code: tenant, name: tenant, status: "active" },
+  });
+
   const admin = await prisma.adminUser.upsert({
     where: { email },
     update: { password: hash },
@@ -93,4 +99,3 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-

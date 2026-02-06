@@ -6,6 +6,7 @@ import { sseHub } from "../../lib/sseHub";
 import { sendTelegramMessage } from "../../services/telegram";
 import { MessageType } from "@prisma/client";
 import { z } from "zod";
+import rateLimit from "express-rate-limit";
 import { recordDeliveryMetric } from "../metrics.live";
 import { createRequestLogger, getRequestId } from "../../utils/logger";
 import { requirePermission } from "../../middleware/basicAuth";
@@ -18,6 +19,14 @@ import {
 
 const router = Router();
 const TENANT_DEFAULT = process.env.TENANT_DEFAULT || "bn9";
+
+const mediaLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, message: "rate_limited" },
+});
 
 const MESSAGE_TYPES = [
   "TEXT",
@@ -61,8 +70,8 @@ const richPayloadSchema = z.object({
         z.object({
           text: z.string().min(1),
           callbackData: z.string().min(1),
-        })
-      )
+        }),
+      ),
     )
     .optional(),
   altText: z.string().optional(),
@@ -104,6 +113,33 @@ function getTenant(req: Request): string {
   return headerTenant || queryTenant || config.TENANT_DEFAULT || TENANT_DEFAULT;
 }
 
+function getActorAdminId(req: Request): string | null {
+  const auth = (req as any).auth as { id?: string; sub?: string } | undefined;
+  return auth?.id || auth?.sub || null;
+}
+
+async function writeAuditLog(args: {
+  tenant: string;
+  actorAdminUserId: string | null;
+  action: string;
+  target?: string;
+  diffJson?: Record<string, unknown>;
+}) {
+  try {
+    await prisma.auditLog.create({
+      data: {
+        tenant: args.tenant,
+        actorAdminUserId: args.actorAdminUserId ?? null,
+        action: args.action,
+        target: args.target ?? null,
+        diffJson: (args.diffJson ?? {}) as any,
+      },
+    });
+  } catch (err) {
+    console.error("[auditLog] create failed", err);
+  }
+}
+
 type PrismaLike = typeof prisma;
 
 type MessagesQuery = {
@@ -117,7 +153,7 @@ type MessagesQuery = {
 
 async function fetchAdminChatMessages(
   params: MessagesQuery,
-  client: PrismaLike = prisma
+  client: PrismaLike = prisma,
 ): Promise<{
   conversationId: string | null;
   items: any[];
@@ -195,7 +231,7 @@ async function fetchAdminChatMessages(
   log.info(
     `[Admin] chat/messages tenant=${tenant} conversationId=${
       resolvedConversation?.id ?? conversationId ?? null
-    } count=${messages.length}`
+    } count=${messages.length}`,
   );
 
   const items = messages.map((m) => ({
@@ -228,7 +264,7 @@ async function fetchAdminChatMessages(
 async function sendLinePushMessage(
   channelAccessToken: string,
   toUserId: string,
-  text: string
+  text: string,
 ): Promise<boolean> {
   if (!channelAccessToken) {
     console.error("[LINE push] missing channelAccessToken");
@@ -266,7 +302,7 @@ function buildLineMessage(
   type: MessageType,
   text: string,
   attachmentUrl?: string | null,
-  attachmentMeta?: Record<string, unknown>
+  attachmentMeta?: Record<string, unknown>,
 ) {
   if (type === "RICH" && attachmentMeta && "cards" in attachmentMeta) {
     return attachmentMeta as any;
@@ -308,7 +344,7 @@ async function sendLineRichMessage(
   type: MessageType,
   text: string,
   attachmentUrl?: string | null,
-  attachmentMeta?: Record<string, unknown>
+  attachmentMeta?: Record<string, unknown>,
 ): Promise<boolean> {
   const f = (globalThis as any).fetch as typeof fetch | undefined;
   if (!f) {
@@ -345,7 +381,7 @@ async function sendTelegramRich(
   text: string,
   attachmentUrl?: string | null,
   attachmentMeta?: Record<string, unknown>,
-  replyToMessageId?: string | number
+  replyToMessageId?: string | number,
 ): Promise<boolean> {
   const f = (globalThis as any).fetch as typeof fetch | undefined;
   if (!f) {
@@ -360,7 +396,7 @@ async function sendTelegramRich(
         | undefined;
 
       const inline_keyboard = keyboard?.map((row) =>
-        row.map((btn) => ({ text: btn.text, callback_data: btn.callbackData }))
+        row.map((btn) => ({ text: btn.text, callback_data: btn.callbackData })),
       );
 
       return await sendTelegramMessage(token, chatId, text, replyToMessageId, {
@@ -394,7 +430,7 @@ async function sendTelegramRich(
             caption: text || undefined,
             reply_to_message_id: replyToMessageId,
           }),
-        }
+        },
       );
       return resp.ok;
     }
@@ -528,7 +564,7 @@ router.get(
           dateTo,
           count: sessions.length,
         },
-        "chat_sessions_ok"
+        "chat_sessions_ok",
       );
 
       return res.json({ ok: true, items: sessions });
@@ -538,7 +574,7 @@ router.get(
         .status(500)
         .json({ ok: false, message: "internal_error_list_sessions" });
     }
-  }
+  },
 );
 
 /* ------------------------------------------------------------------ */
@@ -624,7 +660,7 @@ router.patch(
         .status(500)
         .json({ ok: false, message: "internal_error_update_meta" });
     }
-  }
+  },
 );
 
 /* ------------------------------------------------------------------ */
@@ -688,7 +724,7 @@ router.get(
 
       log.info(
         { requestId, q, limit, count: messages.length },
-        "chat_search_ok"
+        "chat_search_ok",
       );
 
       return res.json({ ok: true, items: messages });
@@ -698,7 +734,7 @@ router.get(
         .status(500)
         .json({ ok: false, message: "internal_error_search" });
     }
-  }
+  },
 );
 
 /* ------------------------------------------------------------------ */
@@ -735,11 +771,11 @@ router.get(
 
       const result = await fetchAdminChatMessages(
         { tenant, conversationId, sessionId, limit, offset, requestId },
-        prisma
+        prisma,
       );
 
       log.info(
-        `[Admin] chat/messages conversationId=${result.conversationId} count=${result.items.length}`
+        `[Admin] chat/messages conversationId=${result.conversationId} count=${result.items.length}`,
       );
 
       return res.json({ ok: true, ...result });
@@ -753,7 +789,7 @@ router.get(
         message: "internal_error_list_messages",
       });
     }
-  }
+  },
 );
 
 /* ------------------------------------------------------------------ */
@@ -776,12 +812,12 @@ router.get(
 
       log.info(
         { tenant, sessionId, limit, offset },
-        "chat_session_messages_request"
+        "chat_session_messages_request",
       );
 
       const result = await fetchAdminChatMessages(
         { tenant, sessionId, limit, offset, requestId },
-        prisma
+        prisma,
       );
 
       return res.json({ ok: true, ...result });
@@ -794,7 +830,7 @@ router.get(
         .status(500)
         .json({ ok: false, message: "internal_error_list_messages" });
     }
-  }
+  },
 );
 
 /* ------------------------------------------------------------------ */
@@ -804,6 +840,7 @@ router.get(
 
 router.get(
   "/line-content/:id",
+  mediaLimiter,
   requirePermission(["manageCampaigns", "viewReports"]),
   async (req: Request, res: Response): Promise<Response> => {
     const requestId = getRequestId(req);
@@ -861,7 +898,7 @@ router.get(
       // ดึง LINE messageId จาก meta (หรือถ้า fallback แล้ว id คือ LINE messageId ก็ใช้ id)
       const meta: any = msg.attachmentMeta ?? {};
       const lineMessageId: string = String(
-        meta.messageId || meta.lineMessageId || meta.contentMessageId || id
+        meta.messageId || meta.lineMessageId || meta.contentMessageId || id,
       ).trim();
 
       if (!lineMessageId) {
@@ -926,7 +963,7 @@ router.get(
         .status(500)
         .json({ ok: false, message: "internal_error_line_content" });
     }
-  }
+  },
 );
 
 /* ------------------------------------------------------------------ */
@@ -1008,7 +1045,7 @@ router.post(
           "RICH",
           messageText,
           attachmentUrl,
-          flexMessage as any
+          flexMessage as any,
         );
       } else if (session.platform === "telegram") {
         const token = bot.secret?.telegramBotToken;
@@ -1022,7 +1059,7 @@ router.post(
           row.map((btn) => ({
             text: btn.text,
             callbackData: btn.callbackData,
-          }))
+          })),
         );
 
         if (inlineKeyboard?.length) {
@@ -1042,7 +1079,7 @@ router.post(
           messageType,
           messageText,
           payload.imageUrl,
-          attachmentMeta ?? undefined
+          attachmentMeta ?? undefined,
         );
       } else {
         return res
@@ -1053,7 +1090,7 @@ router.post(
       recordDeliveryMetric(
         `${session.platform}:${bot.id}`,
         delivered,
-        requestId
+        requestId,
       );
 
       const msg = await prisma.chatMessage.create({
@@ -1110,6 +1147,21 @@ router.post(
         },
       });
 
+      await writeAuditLog({
+        tenant: session.tenant,
+        actorAdminUserId: getActorAdminId(req),
+        action: "chat.richMessage",
+        target: session.userId,
+        diffJson: {
+          platform: session.platform,
+          messageType,
+          delivered,
+          sessionId: session.id,
+          conversationId: conversation.id,
+          messageId: msg.id,
+        },
+      });
+
       return res.json({ ok: true, delivered, messageId: msg.id });
     } catch (err: any) {
       const requestId = getRequestId(req);
@@ -1119,7 +1171,7 @@ router.post(
         .status(500)
         .json({ ok: false, message: "internal_error_rich_message" });
     }
-  }
+  },
 );
 
 /* ------------------------------------------------------------------ */
@@ -1197,7 +1249,7 @@ router.post(
         if (!token) {
           console.warn(
             "[admin chat reply] telegramBotToken missing for bot",
-            bot.id
+            bot.id,
           );
         } else {
           try {
@@ -1207,7 +1259,7 @@ router.post(
               messageType,
               messageText,
               attachmentUrl,
-              (attachmentMeta as any) ?? undefined
+              (attachmentMeta as any) ?? undefined,
             );
           } catch (err) {
             console.error("[admin chat reply] telegram send error", err);
@@ -1218,7 +1270,7 @@ router.post(
         if (!token) {
           console.warn(
             "[admin chat reply] LINE channelAccessToken missing for bot",
-            bot.id
+            bot.id,
           );
         } else {
           try {
@@ -1228,7 +1280,7 @@ router.post(
               messageType,
               fallbackText,
               attachmentUrl,
-              (attachmentMeta as any) ?? undefined
+              (attachmentMeta as any) ?? undefined,
             );
           } catch (err) {
             console.error("[admin chat reply] line push error", err);
@@ -1239,7 +1291,7 @@ router.post(
           "[admin chat reply] unsupported platform",
           platform,
           "sessionId=",
-          session.id
+          session.id,
         );
       }
 
@@ -1321,11 +1373,10 @@ router.post(
         .status(500)
         .json({ ok: false, message: "internal_error_reply" });
     }
-  }
+  },
 );
 
 /* ------------------------------------------------------------------ */
 
 export default router;
 export { router as chatAdminRouter, fetchAdminChatMessages, HttpError };
-

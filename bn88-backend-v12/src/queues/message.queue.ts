@@ -1,4 +1,7 @@
 // src/queues/message.queue.ts
+import { Queue, Worker, JobsOptions } from "bullmq";
+import { createRequestLogger } from "../utils/logger";
+
 export type EnqueueRateLimitedSendArgs = {
   id: string;
   channelId: string;
@@ -11,6 +14,71 @@ export type EnqueueRateLimitedSendResult = {
   delayMs?: number;
   result?: any;
 };
+
+const redisUrl =
+  String(process.env.REDIS_URL || "").trim() || "redis://127.0.0.1:6380";
+const redisSkipFlag =
+  process.env.DISABLE_REDIS === "1" || process.env.ENABLE_REDIS === "0";
+const redisEnabled = Boolean(redisUrl) && !redisSkipFlag;
+const connection = redisEnabled
+  ? {
+      url: redisUrl,
+      retryStrategy: (times: number) => Math.min(times * 5000, 60_000),
+    }
+  : null;
+const queueName = "engagement-message";
+const redisLog = createRequestLogger("redis");
+let redisDisabledWarned = false;
+let redisConnectedLogged = false;
+let workerStarted = false;
+let heartbeatTimer: NodeJS.Timeout | null = null;
+const redisDisabledMessage = redisSkipFlag
+  ? "[redis] disabled via DISABLE_REDIS=1 or ENABLE_REDIS=0."
+  : "[redis] disabled.";
+
+function warnRedisDisabled() {
+  if (redisDisabledWarned) return;
+  redisDisabledWarned = true;
+  redisLog.warn(redisDisabledMessage);
+}
+
+type MessageScheduleJob = {
+  handlerId: string;
+  channelId?: string;
+  requestId?: string;
+};
+
+type ScheduleMessageArgs = {
+  id: string;
+  channelId: string;
+  cron: string;
+  timezone: string;
+  handler: () => Promise<any>;
+  requestId?: string;
+};
+
+let queueInstance: Queue<MessageScheduleJob> | null = null;
+const handlerRegistry = new Map<string, () => Promise<any>>();
+
+function getQueue() {
+  if (!redisEnabled) {
+    warnRedisDisabled();
+    return null;
+  }
+  if (!queueInstance) {
+    queueInstance = new Queue<MessageScheduleJob>(queueName, {
+      connection: connection!,
+    });
+  }
+  return queueInstance;
+}
+
+function startHeartbeat() {
+  if (heartbeatTimer) return;
+  heartbeatTimer = setInterval(() => {
+    redisLog.info("[message.queue] heartbeat", { queue: queueName });
+  }, 60_000);
+}
 
 /**
  * เวอร์ชัน "ให้ผ่าน typecheck + ใช้งานได้ทันที"
@@ -26,7 +94,6 @@ export async function enqueueRateLimitedSend(
 
 /**
  * ใช้ใน followUp.ts
- * ตอนนี้ทำเป็น no-op ที่คืน jobId กลับไปก่อน
  */
 export async function enqueueFollowUpJob(
   payload: any
@@ -37,20 +104,102 @@ export async function enqueueFollowUpJob(
 
 /**
  * ใช้ใน engagementScheduler.ts
- * ตอนนี้ทำเป็น no-op ที่คืน jobId กลับไปก่อน
  */
 export async function scheduleMessageJob(
-  payload: any
+  payload: ScheduleMessageArgs
 ): Promise<{ jobId: string }> {
   const jobId = payload?.id ?? `schedule:${Date.now()}`;
+  const q = getQueue();
+  const log = createRequestLogger(payload.requestId || jobId);
+
+  handlerRegistry.set(jobId, payload.handler);
+
+  if (!q) {
+    log.warn("[message.schedule] redis disabled; running handler directly");
+    return { jobId };
+  }
+
+  const repeat: JobsOptions["repeat"] = {
+    pattern: payload.cron,
+    tz: payload.timezone,
+  };
+
+  await q.add(
+    "message.schedule",
+    {
+      handlerId: jobId,
+      channelId: payload.channelId,
+      requestId: payload.requestId,
+    },
+    {
+      jobId,
+      repeat,
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  );
+
+  log.info("[message.schedule] registered", {
+    jobId,
+    channelId: payload.channelId,
+    cron: payload.cron,
+  });
+
   return { jobId };
 }
 
 /**
  * server.ts เรียกตอนบูตระบบ
- * เวอร์ชันนี้เป็น no-op ก่อน (ให้ผ่าน build)
  */
 export function startMessageWorker(): void {
-  // no-op
+  if (workerStarted) return;
+  if (!redisEnabled) {
+    warnRedisDisabled();
+    return;
+  }
+  workerStarted = true;
+  redisLog.info(`redis connecting to ${redisUrl}`);
+
+  try {
+    const worker = new Worker<MessageScheduleJob>(
+      queueName,
+      async (job) => {
+        const log = createRequestLogger(job.data.requestId || job.id);
+        const handler = handlerRegistry.get(job.data.handlerId);
+        if (!handler) {
+          log.warn("[message.schedule] handler missing", {
+            handlerId: job.data.handlerId,
+          });
+          return;
+        }
+        log.info("[message.schedule] firing", {
+          handlerId: job.data.handlerId,
+          channelId: job.data.channelId,
+        });
+        await handler();
+      },
+      { connection: connection! }
+    );
+
+    worker.on("ready", () => {
+      if (redisConnectedLogged) return;
+      redisConnectedLogged = true;
+      redisLog.info("redis connected");
+      startHeartbeat();
+    });
+
+    worker.on("failed", (job, err) => {
+      const log = createRequestLogger(job?.data?.requestId || job?.id);
+      log.error("[message.schedule] worker failed", err);
+    });
+
+    worker.on("error", (err) => {
+      redisLog.warn("[redis] connection error (retrying with backoff)", err);
+    });
+  } catch (err) {
+    workerStarted = false;
+    redisLog.warn("[redis] worker start failed (will retry)", err);
+    setTimeout(() => startMessageWorker(), 10_000);
+  }
 }
 

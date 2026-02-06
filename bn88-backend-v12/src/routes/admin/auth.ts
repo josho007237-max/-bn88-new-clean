@@ -2,6 +2,7 @@
 import { Router, type Request, type Response } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import rateLimit from "express-rate-limit";
 import { prisma } from "../../lib/prisma";
 import { signJwt } from "../../lib/jwt";
 import { config } from "../../config";
@@ -11,6 +12,14 @@ const router = Router();
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, message: "rate_limited" },
 });
 
 export type AuthPayload = {
@@ -50,7 +59,7 @@ function ensureAdminRole(roles: string[]): string[] {
   });
 }
 
-router.post("/login", async (req: Request, res: Response) => {
+router.post("/login", loginLimiter, async (req: Request, res: Response) => {
   try {
     const parsed = loginSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -142,4 +151,3 @@ router.post("/login", async (req: Request, res: Response) => {
 });
 
 export default router;
-

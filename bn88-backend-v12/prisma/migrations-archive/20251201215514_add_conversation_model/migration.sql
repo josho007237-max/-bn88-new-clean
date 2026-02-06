@@ -7,6 +7,32 @@
   - Added the required column `platform` to the `Conversation` table without a default value. This is not possible if the table is not empty.
 
 */
+-- Ensure CampaignSchedule exists before altering (migration order safety)
+CREATE TABLE IF NOT EXISTS "CampaignSchedule" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "campaignId" TEXT NOT NULL,
+    "cronExpr" TEXT NOT NULL,
+    "timezone" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+    "startAt" DATETIME,
+    "endAt" DATETIME,
+    "idempotencyKey" TEXT,
+    "lastRunAt" DATETIME,
+    "nextRunAt" DATETIME,
+    "meta" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- Ensure Conversation exists before altering (migration order safety)
+CREATE TABLE IF NOT EXISTS "Conversation" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "tenant" TEXT NOT NULL,
+    "botId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "Conversation_botId_fkey" FOREIGN KEY ("botId") REFERENCES "Bot" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+);
 -- RedefineTables
 PRAGMA defer_foreign_keys=ON;
 PRAGMA foreign_keys=OFF;

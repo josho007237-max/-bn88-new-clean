@@ -15,7 +15,7 @@ export async function sendTelegramMessage(
   chatId: number | string,
   text: string,
   replyToMessageId?: string | number,
-  options?: TelegramSendOptions
+  options?: TelegramSendOptions,
 ): Promise<boolean> {
   const f = (globalThis as any).fetch as typeof fetch | undefined;
   if (!f) {
@@ -44,6 +44,10 @@ export async function sendTelegramMessage(
     if (options?.documentName) body.caption = options.documentName;
     if (text && !options?.documentName) body.caption = text;
   } else {
+    if (!text || !text.trim()) {
+      console.error("[Telegram] sendMessage skipped: empty text");
+      return false;
+    }
     body.text = text;
   }
 
@@ -53,7 +57,7 @@ export async function sendTelegramMessage(
     };
   }
 
-  if (replyToMessageId) {
+  if (replyToMessageId !== undefined && replyToMessageId !== null) {
     body.reply_to_message_id = replyToMessageId;
   }
 
@@ -71,7 +75,7 @@ export async function sendTelegramMessage(
 
       if (!resp.ok) {
         console.error(
-          `[Telegram] send error attempt ${attempt}: status=${resp.status}, body=${raw}`
+          `[Telegram] send error attempt ${attempt}: status=${resp.status}, body=${raw}`,
         );
         throw new Error(`Telegram ${resp.status}`);
       }
@@ -82,10 +86,7 @@ export async function sendTelegramMessage(
       lastError = err;
       const msg = String(err?.message ?? err);
 
-      console.error(
-        `[Telegram] send error attempt ${attempt}:`,
-        msg
-      );
+      console.error(`[Telegram] send error attempt ${attempt}:`, msg);
 
       if (
         attempt < 3 &&
@@ -107,7 +108,7 @@ export async function startTelegramLive(
   botToken: string,
   channelId: number | string,
   title: string,
-  description?: string
+  description?: string,
 ) {
   const f = (globalThis as any).fetch as typeof fetch | undefined;
   if (!f) return false;
@@ -119,7 +120,7 @@ export async function sendTelegramPoll(
   botToken: string,
   channelId: number | string,
   question: string,
-  options: string[]
+  options: string[],
 ) {
   const f = (globalThis as any).fetch as typeof fetch | undefined;
   if (!f) return false;
@@ -130,15 +131,45 @@ export async function sendTelegramPoll(
     options,
     is_anonymous: false,
   };
-  const resp = await f(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    console.error("[Telegram] sendPoll error", await resp.text().catch(() => ""));
-    return false;
-  }
-  return true;
-}
+  let lastError: any = null;
 
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const resp = await f(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const raw = await resp.text().catch(() => "");
+
+      if (!resp.ok) {
+        console.error(
+          `[Telegram] sendPoll error attempt ${attempt}: status=${resp.status}, body=${raw}`,
+        );
+        throw new Error(`Telegram ${resp.status}`);
+      }
+
+      return true;
+    } catch (err: any) {
+      lastError = err;
+      const msg = String(err?.message ?? err);
+
+      console.error(`[Telegram] sendPoll error attempt ${attempt}:`, msg);
+
+      if (
+        attempt < 3 &&
+        (/ECONNRESET|ETIMEDOUT|ENETUNREACH|ECONNREFUSED/i.test(msg) ||
+          /Telegram 5\d\d/.test(msg))
+      ) {
+        await new Promise((r) => setTimeout(r, 500 * attempt));
+        continue;
+      }
+
+      break;
+    }
+  }
+
+  console.error("[Telegram] sendPoll failed after retries:", lastError);
+  return false;
+}

@@ -1,5 +1,5 @@
 -- CreateTable
-CREATE TABLE "CampaignSchedule" (
+CREATE TABLE IF NOT EXISTS "CampaignSchedule" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "campaignId" TEXT NOT NULL,
     "cronExpr" TEXT NOT NULL,
@@ -16,7 +16,7 @@ CREATE TABLE "CampaignSchedule" (
 );
 
 -- CreateIndex
-CREATE INDEX "CampaignSchedule_campaignId" ON "CampaignSchedule"("campaignId");
+CREATE INDEX IF NOT EXISTS "CampaignSchedule_campaignId" ON "CampaignSchedule"("campaignId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "CampaignSchedule_idempotencyKey_key" ON "CampaignSchedule"("idempotencyKey");
+CREATE UNIQUE INDEX IF NOT EXISTS "CampaignSchedule_idempotencyKey_key" ON "CampaignSchedule"("idempotencyKey");

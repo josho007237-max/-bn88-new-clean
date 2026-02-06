@@ -14,6 +14,54 @@ const getStr = (q: unknown): string =>
     ? String(q[0] ?? "").trim()
     : "";
 
+const getTenant = (req: Request): string =>
+  (req.headers["x-tenant"] as string) ||
+  process.env.TENANT_DEFAULT ||
+  "bn9";
+
+const parseSinceDays = (q: unknown, fallback = 7): number => {
+  const raw = Number(getStr(q) || fallback);
+  if (!Number.isFinite(raw)) return fallback;
+  return Math.min(Math.max(Math.round(raw), 1), 365);
+};
+
+/* ------------------------------------------------------------------
+ * GET /api/stats?sinceDays=7
+ * ------------------------------------------------------------------ */
+router.get("/", async (req: Request, res: Response) => {
+  try {
+    const tenant = getTenant(req);
+    const sinceDays = parseSinceDays(req.query.sinceDays, 7);
+
+    const toUTC = new Date();
+    const fromUTC = new Date(toUTC.getTime() - sinceDays * 24 * 60 * 60 * 1000);
+
+    const [messages, cases, bots] = await Promise.all([
+      prisma.chatMessage.count({
+        where: { tenant, createdAt: { gte: fromUTC, lte: toUTC } },
+      }),
+      prisma.caseItem.count({
+        where: { tenant, createdAt: { gte: fromUTC, lte: toUTC } },
+      }),
+      prisma.bot.count({ where: { tenant } }),
+    ]);
+
+    return res.json({
+      ok: true,
+      tenant,
+      window: {
+        sinceDays,
+        fromUTC: fromUTC.toISOString(),
+        toUTC: toUTC.toISOString(),
+      },
+      totals: { messages, cases, bots },
+    });
+  } catch (e) {
+    console.error("[/stats]", e);
+    return res.status(500).json({ ok: false, message: "internal_error" });
+  }
+});
+
 /* ------------------------------------------------------------------
  * GET /api/stats/daily?botId=...&dateKey=YYYY-MM-DD(ถ้าไม่ส่งใช้วันนี้)
  * ------------------------------------------------------------------ */

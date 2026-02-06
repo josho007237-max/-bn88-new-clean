@@ -16,6 +16,15 @@ async function main() {
   const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
   /* ------------------------------------------------------------------ */
+  /* 0) Tenant                                                          */
+  /* ------------------------------------------------------------------ */
+  await prisma.tenant.upsert({
+    where: { code: TENANT },
+    update: { name: TENANT, status: "active" },
+    create: { code: TENANT, name: TENANT, status: "active" },
+  });
+
+  /* ------------------------------------------------------------------ */
   /* 1) Admin user                                                      */
   /* ------------------------------------------------------------------ */
   const hash = await bcrypt.hash(ADMIN_PASSWORD, 10);
@@ -67,29 +76,28 @@ async function main() {
     },
   });
 
-  const preset =
-    existingPreset
-      ? await prisma.aiPreset.update({
-          where: { id: existingPreset.id },
-          data: {
-            model: OPENAI_MODEL,
-            temperature: 0.3,
-            topP: 1,
-            maxTokens: 800,
-            systemPrompt: "",
-          },
-        })
-      : await prisma.aiPreset.create({
-          data: {
-            tenant: TENANT,
-            name: "default",
-            model: OPENAI_MODEL,
-            temperature: 0.3,
-            topP: 1,
-            maxTokens: 800,
-            systemPrompt: "",
-          },
-        });
+  const preset = existingPreset
+    ? await prisma.aiPreset.update({
+        where: { id: existingPreset.id },
+        data: {
+          model: OPENAI_MODEL,
+          temperature: 0.3,
+          topP: 1,
+          maxTokens: 800,
+          systemPrompt: "",
+        },
+      })
+    : await prisma.aiPreset.create({
+        data: {
+          tenant: TENANT,
+          name: "default",
+          model: OPENAI_MODEL,
+          temperature: 0.3,
+          topP: 1,
+          maxTokens: 800,
+          systemPrompt: "",
+        },
+      });
 
   console.log("Upserted preset:", {
     id: preset.id,
@@ -193,4 +201,3 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-

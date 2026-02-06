@@ -24,6 +24,26 @@ import { findFaqAnswer } from "../faq";
 
 const toJson = (v: unknown) => normalizeJson(v);
 
+function extractMediaInfo(meta: unknown): {
+  contentId: string;
+  size?: number;
+  mimeType?: string;
+} | null {
+  if (!meta || typeof meta !== "object") return null;
+  const anyMeta = meta as Record<string, unknown>;
+  const rawId =
+    anyMeta.messageId || anyMeta.lineMessageId || anyMeta.contentMessageId;
+  const contentId = String(rawId || "").trim();
+  if (!contentId) return null;
+
+  const sizeRaw = anyMeta.fileSize;
+  const size = Number.isFinite(Number(sizeRaw)) ? Number(sizeRaw) : undefined;
+  const mimeType =
+    typeof anyMeta.mimeType === "string" ? anyMeta.mimeType : undefined;
+
+  return { contentId, size, mimeType };
+}
+
 export type ProcessIncomingParams = {
   botId: string;
   platform: SupportedPlatform;
@@ -160,7 +180,7 @@ function fallbackThanks(lang: string): string {
 }
 
 export async function processIncomingMessage(
-  params: ProcessIncomingParams
+  params: ProcessIncomingParams,
 ): Promise<ProcessIncomingResult> {
   const {
     botId,
@@ -312,6 +332,29 @@ export async function processIncomingMessage(
       },
     });
 
+    const mediaInfo = extractMediaInfo(params.attachmentMeta);
+    if (
+      mediaInfo &&
+      (incomingType === MessageType.IMAGE || incomingType === MessageType.FILE)
+    ) {
+      try {
+        await prisma.mediaAsset.create({
+          data: {
+            tenant: bot.tenant,
+            provider: platform,
+            contentId: mediaInfo.contentId,
+            mimeType: mediaInfo.mimeType ?? null,
+            size: mediaInfo.size ?? null,
+            storageKey: params.attachmentUrl ?? null,
+            sessionId: session.id,
+            chatMessageId: userChatMessage.id,
+          },
+        });
+      } catch (err) {
+        log.warn("[processIncomingMessage] mediaAsset create failed", err);
+      }
+    }
+
     // SSE: new user message
     safeBroadcast({
       type: "chat:message:new",
@@ -400,7 +443,7 @@ export async function processIncomingMessage(
     } catch (err) {
       console.error(
         "[processIncomingMessage] getOpenAIClientForBot error",
-        (err as any)?.message ?? err
+        (err as any)?.message ?? err,
       );
       return fallback;
     }
@@ -526,7 +569,7 @@ LANGUAGE POLICY:
     if (Array.isArray(rawContent)) {
       rawContent = rawContent
         .map((p: any) =>
-          typeof p === "string" ? p : (p?.text ?? p?.content ?? "")
+          typeof p === "string" ? p : (p?.text ?? p?.content ?? ""),
         )
         .join("");
     }
@@ -558,7 +601,7 @@ LANGUAGE POLICY:
       console.error(
         "[processIncomingMessage] JSON parse error from GPT",
         err,
-        rawContent
+        rawContent,
       );
     }
 
@@ -648,7 +691,7 @@ LANGUAGE POLICY:
       } catch (err) {
         console.error(
           "[processIncomingMessage] error while creating case/stat",
-          (err as any)?.message ?? err
+          (err as any)?.message ?? err,
         );
       }
     } else {
@@ -685,7 +728,7 @@ LANGUAGE POLICY:
       } catch (err) {
         console.error(
           "[processIncomingMessage] statDaily non-issue error",
-          (err as any)?.message ?? err
+          (err as any)?.message ?? err,
         );
       }
     }
@@ -748,7 +791,7 @@ LANGUAGE POLICY:
       } catch (err) {
         console.error(
           "[processIncomingMessage] ingest bot message error",
-          (err as any)?.message ?? err
+          (err as any)?.message ?? err,
         );
       }
     }
@@ -771,7 +814,7 @@ LANGUAGE POLICY:
   } catch (err) {
     console.error(
       "[processIncomingMessage] fatal error",
-      (err as any)?.message ?? err
+      (err as any)?.message ?? err,
     );
     return { ...fallback, actions: actionResults };
   }

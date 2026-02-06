@@ -7,6 +7,11 @@ import { prisma } from "../lib/prisma";
 import { imageSamplesRouter } from "./admin/imageSamples.js";
 
 const router = Router();
+
+/** GET /api/admin/health */
+router.get("/health", (_req: Request, res: Response) => {
+  res.json({ ok: true, time: new Date().toISOString() });
+});
 async function getRuleOrThrow(ruleId: string) {
   const rule = await prisma.dailyRule.findUnique({
     where: { id: ruleId },

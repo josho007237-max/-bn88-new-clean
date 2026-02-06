@@ -1,9 +1,9 @@
 // src/server.ts
 process.on("unhandledRejection", (err) =>
-  console.error("[UNHANDLED REJECTION]", err)
+  console.error("[UNHANDLED REJECTION]", err),
 );
 process.on("uncaughtException", (err) =>
-  console.error("[UNCAUGHT EXCEPTION]", err)
+  console.error("[UNCAUGHT EXCEPTION]", err),
 );
 
 import * as fs from "node:fs";
@@ -37,7 +37,7 @@ function detectDuplicateEnvKeys(filePath: string) {
     for (const [key, rows] of lineMap.entries()) {
       if (rows.length <= 1) continue;
       console.error(
-        `[BOOT][ENV_DUPLICATE] key "${key}" appears ${rows.length} times in ${filePath} (lines: ${rows.join(", ")})`
+        `[BOOT][ENV_DUPLICATE] key "${key}" appears ${rows.length} times in ${filePath} (lines: ${rows.join(", ")})`,
       );
     }
   } catch (err) {
@@ -69,6 +69,7 @@ import { logger } from "./mw/logger";
 import { authGuard } from "./mw/auth";
 import { sseHandler } from "./live";
 import { metricsSseHandler, metricsStreamHandler } from "./routes/metrics.live";
+import { prisma } from "./lib/prisma";
 
 import { startEngagementScheduler } from "./services/engagementScheduler";
 import { startCampaignScheduleWorker } from "./queues/campaign.queue";
@@ -121,7 +122,7 @@ if (webhookBaseUrl) {
   if (isHttp || isLocal) {
     console.warn(
       `[WARN] LINE webhook requires HTTPS. WEBHOOK_BASE_URL=${webhookBaseUrl} is not public HTTPS. ` +
-        "Use a tunnel (cloudflared tunnel --url http://localhost:3000)."
+        "Use a tunnel (cloudflared tunnel --url http://localhost:3000).",
     );
   }
 }
@@ -148,27 +149,24 @@ app.use(
       (req as any).rawBody = req.body;
     }
     return next();
-  }
+  },
 );
 app.use(
   express.json({
     limit: "1mb",
     verify: (req, _res, buf) => {
-      if (
-        req.originalUrl &&
-        req.originalUrl.startsWith("/api/webhooks/line")
-      ) {
+      if (req.originalUrl && req.originalUrl.startsWith("/api/webhooks/line")) {
         (req as any).rawBody = buf;
       }
     },
-  })
+  }),
 );
 app.use((req, res, next) => {
   if (req.path.startsWith("/api/webhooks/line")) return next();
   return express.urlencoded({ extended: false, limit: "200kb" })(
     req,
     res,
-    next
+    next,
   );
 });
 app.use(cookieParser());
@@ -188,14 +186,14 @@ const allowList = new Set(
   (config.ALLOWED_ORIGINS || "")
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean)
+    .filter(Boolean),
 );
 
 app.use(
   helmet({
     contentSecurityPolicy: false,
     crossOriginResourcePolicy: { policy: "cross-origin" },
-  })
+  }),
 );
 
 app.use(
@@ -207,7 +205,7 @@ app.use(
     credentials: true,
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "x-tenant"],
-  })
+  }),
 );
 
 app.use(morgan("dev"));
@@ -220,7 +218,7 @@ app.use(
       if (req.path.startsWith("/api/live/")) return false;
       return compression.filter(req, res as any);
     },
-  })
+  }),
 );
 
 /* Rate limit (mounted on /api) */
@@ -238,6 +236,14 @@ const limiter = rateLimit({
 });
 app.use("/api", limiter);
 
+const webhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, message: "rate_limited" },
+});
+
 /* Health */
 app.use("/api/health", health);
 app.get("/api/health", (_req, res) =>
@@ -245,7 +251,7 @@ app.get("/api/health", (_req, res) =>
     ok: true,
     time: new Date().toISOString(),
     adminApi: true,
-  })
+  }),
 );
 
 /* Dev & tools */
@@ -258,6 +264,47 @@ app.use("/api/auth", authRoutes);
 app.use("/api/bots", botsRoutes);
 app.use("/api/bots", botsSummary);
 app.use("/api/cases", casesRoutes);
+
+app.get("/api/stats", async (req: Request, res: Response) => {
+  try {
+    const tenant =
+      (req.headers["x-tenant"] as string) ||
+      process.env.TENANT_DEFAULT ||
+      "bn9";
+    const sinceDaysRaw = Number(req.query?.sinceDays ?? 7);
+    const sinceDays = Number.isFinite(sinceDaysRaw)
+      ? Math.min(Math.max(Math.round(sinceDaysRaw), 1), 365)
+      : 7;
+
+    const toUTC = new Date();
+    const fromUTC = new Date(toUTC.getTime() - sinceDays * 24 * 60 * 60 * 1000);
+
+    const [messages, cases, bots] = await Promise.all([
+      prisma.chatMessage.count({
+        where: { tenant, createdAt: { gte: fromUTC, lte: toUTC } },
+      }),
+      prisma.caseItem.count({
+        where: { tenant, createdAt: { gte: fromUTC, lte: toUTC } },
+      }),
+      prisma.bot.count({ where: { tenant } }),
+    ]);
+
+    return res.json({
+      ok: true,
+      tenant,
+      window: {
+        sinceDays,
+        fromUTC: fromUTC.toISOString(),
+        toUTC: toUTC.toISOString(),
+      },
+      totals: { messages, cases, bots },
+    });
+  } catch (err) {
+    console.error("[/api/stats] fallback error", err);
+    return res.status(500).json({ ok: false, message: "internal_error" });
+  }
+});
+
 app.use("/api/stats", statsRoutes);
 app.use("/api/ai/answer", aiAnswerRoute);
 
@@ -267,13 +314,13 @@ app.get("/api/live/metrics", metricsSseHandler);
 app.get("/metrics/stream", metricsStreamHandler);
 
 startEngagementScheduler().catch((err) =>
-  console.error("[BOOT] engagement scheduler error", err)
+  console.error("[BOOT] engagement scheduler error", err),
 );
 
 /* Webhooks */
-app.use("/api/webhooks/line", lineWebhookRouter);
-app.use("/api/webhooks/facebook", facebookWebhookRouter);
-app.use("/api/webhooks/telegram", telegramWebhookRouter);
+app.use("/api/webhooks/line", webhookLimiter, lineWebhookRouter);
+app.use("/api/webhooks/facebook", webhookLimiter, facebookWebhookRouter);
+app.use("/api/webhooks/telegram", webhookLimiter, telegramWebhookRouter);
 
 /* Admin */
 app.use("/api/admin/uploads", adminUploadsRouter);
@@ -323,12 +370,13 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 const HOST = (process.env.HOST || "0.0.0.0").trim() || "0.0.0.0";
 const PORT_ENV = (process.env.PORT || "").trim();
 const PORT = Number(PORT_ENV || config.PORT || 3000);
-const REDIS_URL = String(process.env.REDIS_URL || "").trim() || "redis://127.0.0.1:6380";
+const REDIS_URL =
+  String(process.env.REDIS_URL || "").trim() || "redis://127.0.0.1:6380";
 const REDIS_PORT = process.env.REDIS_PORT || "";
 
 const server = app.listen(PORT, HOST, () => {
   console.log(
-    `[BOOT] listening on http://${HOST}:${PORT} (PORT env=${PORT_ENV || "n/a"})`
+    `[BOOT] listening on http://${HOST}:${PORT} (PORT env=${PORT_ENV || "n/a"})`,
   );
   console.log(`redis connecting to ${REDIS_URL}`);
   console.log("[env]", { HOST, PORT, REDIS_URL, REDIS_PORT });
@@ -338,7 +386,9 @@ server.on("error", (err: NodeJS.ErrnoException) => {
   if (err?.code === "EADDRINUSE") {
     console.error(`[BOOT][ERROR] Port ${PORT} is in use`);
     console.error("[BOOT][HINT] Run: npm run port:3000");
-    console.error("[BOOT][HINT] Then free port quickly: npm run port:3000:kill");
+    console.error(
+      "[BOOT][HINT] Then free port quickly: npm run port:3000:kill",
+    );
     process.exit(1);
   }
   console.error("[BOOT][ERROR] server listen failed", err);

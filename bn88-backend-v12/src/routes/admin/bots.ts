@@ -50,11 +50,7 @@ type RequestWithBot = Request & { bot?: Bot };
 /*                                   Helpers                                  */
 /* -------------------------------------------------------------------------- */
 
-async function findBot(
-  req: RequestWithBot,
-  res: Response,
-  next: NextFunction
-) {
+async function findBot(req: RequestWithBot, res: Response, next: NextFunction) {
   const botId = (req.params.id ?? req.params.botId) as string | undefined;
   if (!botId || typeof botId !== "string") {
     return res.status(400).json({ ok: false, message: "missing_botId" });
@@ -70,6 +66,33 @@ async function findBot(
   } catch (err) {
     console.error("[findBot] error:", err);
     return res.status(500).json({ ok: false, message: "internal_error" });
+  }
+}
+
+function getActorAdminId(req: Request): string | null {
+  const auth = (req as any).auth as { id?: string; sub?: string } | undefined;
+  return auth?.id || auth?.sub || null;
+}
+
+async function writeAuditLog(args: {
+  tenant: string;
+  actorAdminUserId: string | null;
+  action: string;
+  target?: string;
+  diffJson?: Record<string, unknown>;
+}) {
+  try {
+    await prisma.auditLog.create({
+      data: {
+        tenant: args.tenant,
+        actorAdminUserId: args.actorAdminUserId ?? null,
+        action: args.action,
+        target: args.target ?? null,
+        diffJson: (args.diffJson ?? {}) as any,
+      },
+    });
+  } catch (err) {
+    console.error("[auditLog] create failed", err);
   }
 }
 
@@ -101,7 +124,7 @@ router.get(
       console.error("GET /admin/bots error:", err);
       return res.status(500).json({ ok: false, message: "internal_error" });
     }
-  }
+  },
 );
 
 // GET /api/admin/bots/:id
@@ -111,7 +134,7 @@ router.get(
   findBot,
   (req: Request, res: Response) => {
     return res.json({ ok: true, bot: (req as RequestWithBot).bot as Bot });
-  }
+  },
 );
 
 // PATCH /api/admin/bots/:id
@@ -165,7 +188,7 @@ router.patch(
       console.error("PATCH /admin/bots/:id error:", err);
       return res.status(500).json({ ok: false, message: "internal_error" });
     }
-  }
+  },
 );
 
 // POST /api/admin/bots/init
@@ -222,7 +245,7 @@ router.post(
       console.error("POST /admin/bots/init error:", e);
       return res.status(500).json({ ok: false, message: "internal_error" });
     }
-  }
+  },
 );
 
 /* -------------------------------------------------------------------------- */
@@ -246,15 +269,15 @@ const secretsSchema = z
     (v) =>
       Boolean(
         v.openaiApiKey ||
-          v.openAiApiKey ||
-          v.openaiKey ||
-          v.lineAccessToken ||
-          v.lineChannelSecret ||
-          v.lineSecret
+        v.openAiApiKey ||
+        v.openaiKey ||
+        v.lineAccessToken ||
+        v.lineChannelSecret ||
+        v.lineSecret,
       ),
     {
       message: "at_least_one_field_required",
-    }
+    },
   );
 
 // GET /api/admin/bots/:id/secrets
@@ -277,7 +300,7 @@ router.get(
       console.error("GET /admin/bots/:id/secrets error:", err);
       return res.status(500).json({ ok: false, message: "internal_error" });
     }
-  }
+  },
 );
 
 // POST /api/admin/bots/:id/secrets
@@ -318,7 +341,8 @@ router.post(
       } = {};
 
       if (norm.openaiApiKey) update.openaiApiKey = norm.openaiApiKey;
-      if (norm.lineAccessToken) update.channelAccessToken = norm.lineAccessToken;
+      if (norm.lineAccessToken)
+        update.channelAccessToken = norm.lineAccessToken;
       if (norm.lineChannelSecret) update.channelSecret = norm.lineChannelSecret;
 
       const secretRow = await prisma.botSecret.upsert({
@@ -337,6 +361,18 @@ router.post(
         },
       });
 
+      await writeAuditLog({
+        tenant: bot.tenant,
+        actorAdminUserId: getActorAdminId(req),
+        action: "bot.secrets.update",
+        target: botId,
+        diffJson: {
+          openaiApiKey: Boolean(norm.openaiApiKey),
+          lineAccessToken: Boolean(norm.lineAccessToken),
+          lineChannelSecret: Boolean(norm.lineChannelSecret),
+        },
+      });
+
       const hasLine =
         Boolean(secretRow.channelAccessToken) &&
         Boolean(secretRow.channelSecret);
@@ -348,7 +384,7 @@ router.post(
         });
 
         safeBroadcast({
-          type: "bot:updated", 
+          type: "bot:updated",
           tenant: updated.tenant,
           botId: updated.id,
           at: new Date().toISOString(),
@@ -368,7 +404,7 @@ router.post(
       console.error("POST /admin/bots/:id/secrets error:", err);
       return res.status(500).json({ ok: false, message: "internal_error" });
     }
-  }
+  },
 );
 
 /* -------------------------------------------------------------------------- */
@@ -442,6 +478,16 @@ async function handleWriteConfig(req: RequestWithBot, res: Response) {
       },
     });
 
+    await writeAuditLog({
+      tenant: bot.tenant ?? "bn9",
+      actorAdminUserId: getActorAdminId(req),
+      action: "bot.config.update",
+      target: bot.id,
+      diffJson: {
+        fields: updateData,
+      },
+    });
+
     return res.json({
       ok: true,
       config: {
@@ -465,7 +511,7 @@ router.get(
   "/:botId/config",
   requirePermission(["manageBots"]),
   findBot,
-  handleGetConfig
+  handleGetConfig,
 );
 
 // PUT หรือ PATCH /api/admin/bots/:botId/config  (รองรับทั้งสอง method)
@@ -473,14 +519,13 @@ router.put(
   "/:botId/config",
   requirePermission(["manageBots"]),
   findBot,
-  handleWriteConfig
+  handleWriteConfig,
 );
 router.patch(
   "/:botId/config",
   requirePermission(["manageBots"]),
   findBot,
-  handleWriteConfig
+  handleWriteConfig,
 );
 
 export default router;
-
