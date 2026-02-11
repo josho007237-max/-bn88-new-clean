@@ -1,5 +1,12 @@
  copilot/fix-bn88-project-issues-again
 # BN88 start-dev.ps1
+copilot/fix-and-improve-bn88-project
+# Get the script's directory as the root (works cross-platform)
+$root = $PSScriptRoot
+
+Write-Host "Starting BN88 dev stack..." -ForegroundColor Cyan
+Write-Host "Root directory: $root" -ForegroundColor Gray
+=======
 # Dynamically determine the repository root directory
 $root = Split-Path -Parent $PSCommandPath
 
@@ -35,6 +42,7 @@ if (-not (Test-Path $frontendEnv)) {
 }
 
 Write-Host "`nStarting backend and frontend in separate windows..." -ForegroundColor Cyan
+ main
 
 # Backend
 Start-Process pwsh -ArgumentList "-NoExit","-Command","cd `"$backendPath`"; Write-Host 'Backend starting on port 3000...' -ForegroundColor Cyan; npm run dev"

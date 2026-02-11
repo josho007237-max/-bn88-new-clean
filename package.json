@@ -1,8 +1,9 @@
 {
-  "name": "bn88-backend-v12",
-  "version": "12.0.0",
-  "main": "dist/server.js",
-  "license": "MIT",
+  "name": "bn88-new-clean-workspace",
+  "version": "1.0.0",
+  "description": "BN88 Full-stack LINE messaging platform workspace",
+  "private": true,
+  "license": "UNLICENSED",
   "scripts": {
     "check:all": "pwsh -ExecutionPolicy Bypass -File ./src/scripts/dev-check.ps1",
     "check:line": "pwsh -ExecutionPolicy Bypass -File ./src/scripts/dev-check-line.ps1",
