@@ -1,7 +1,9 @@
 # BN88 start-dev.ps1
-$root = "C:\BN88\BN88-new-clean"
+# Get the script's directory as the root (works cross-platform)
+$root = $PSScriptRoot
 
 Write-Host "Starting BN88 dev stack..." -ForegroundColor Cyan
+Write-Host "Root directory: $root" -ForegroundColor Gray
 
 # Backend
 Start-Process pwsh -ArgumentList "-NoExit","-Command","cd `"$root\bn88-backend-v12`"; npm run dev"
