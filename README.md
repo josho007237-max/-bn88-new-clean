@@ -2,6 +2,8 @@
 
 > A multi-tenant LINE bot management platform with admin dashboard, webhook handling, and engagement tools.
 
+**🚀 [Quick Start Guide](./QUICKSTART.md)** - Get started in 5 minutes!
+
 ## 🎯 Overview
 
 BN88 is a comprehensive platform for managing LINE bots with:
@@ -25,6 +27,28 @@ BN88 is a comprehensive platform for managing LINE bots with:
 - [Contributing](#-contributing)
 
 ## 🚀 Quick Start
+
+**New to the project?** Follow the [Quick Start Guide](./QUICKSTART.md) for a 5-minute setup!
+
+### Automated Setup (Recommended)
+
+```powershell
+# 1. Clone the repository
+git clone <repo-url>
+cd -bn88-new-clean
+
+# 2. Run automated setup
+.\setup.ps1
+
+# 3. Start development environment
+.\start-dev.ps1
+
+# 4. Open browser
+# http://localhost:5555
+# Login: root@bn9.local / bn9@12345
+```
+
+### Manual Setup
 
 ```powershell
 # 1. Clone the repository
