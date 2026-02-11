@@ -32,7 +32,7 @@ const EnvSchema = z.object({
   LEP_BASE_URL: z.string().default("http://localhost:8080"),
 
   // Messaging / rate limit
-  REDIS_URL: z.string().default("redis://127.0.0.1:6379"),
+  REDIS_URL: z.string().default("redis://127.0.0.1:6380"),
   REDIS_RATE_LIMIT: z.coerce.number().int().positive().default(60),
   MESSAGE_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(60),
   MESSAGE_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(90),
