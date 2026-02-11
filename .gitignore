@@ -1,15 +1,44 @@
+copilot/fix-bn88-project-issues-again
+# Node.js
 # ===============================================
 # BN88 Project .gitignore
 # ===============================================
-
 # -----------------------------------------------
 # Dependencies
 # -----------------------------------------------
+main
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+copilot/fix-bn88-project-issues-again
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.nuxt/
+.cache/
+
+# Logs
+logs/
+*.log
+log/
+
+# Environment files - NEVER commit secrets!
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+
+# Database files
+
 lerna-debug.log*
 
 # -----------------------------------------------
@@ -51,11 +80,17 @@ lerna-debug.log*
 # -----------------------------------------------
 # Databases
 # -----------------------------------------------
+main
 dev.db
 *.db
 *.db-journal
 *.sqlite
 *.sqlite3
+copilot/fix-bn88-project-issues-again
+
+# IDE and Editor files
+.vscode/
+=======
 *.sqlite-journal
 
 # -----------------------------------------------
@@ -63,10 +98,37 @@ dev.db
 # -----------------------------------------------
 .vscode/
 !.vscode/extensions.json
+main
 .idea/
 *.swp
 *.swo
 *~
+ copilot/fix-bn88-project-issues-again
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Docker
+.wrangler/
+.wrangler-d1/
+
+# TypeScript
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.log
+=======
 .project
 .classpath
 .c9/
@@ -150,3 +212,4 @@ public/uploads/
 runlog.txt
 *.out
 tree_clean.txt
+main

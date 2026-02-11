@@ -1,3 +1,8 @@
+ copilot/fix-bn88-project-issues-again
+# BN88 stop-dev.ps1
+Write-Host "Stopping BN88 dev stack..." -ForegroundColor Cyan
+
+=======
 # ===============================================
 # BN88 Development Server Shutdown Script
 # ===============================================
@@ -13,7 +18,9 @@ Write-Host ""
 # 3000: Backend API
 # 5555: Frontend Dashboard
 # 5556-5566: Additional ports (Prisma Studio, etc.)
+ main
 $ports = @(3000, 5555) + (5556..5566)
+$stoppedCount = 0
 
 $killedCount = 0
 
@@ -28,14 +35,30 @@ foreach ($p in $ports) {
         $procId = $c.OwningProcess
         $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
 
+ copilot/fix-bn88-project-issues-again
+    if ($proc) {
+      Write-Host "Killing PID=$procId ($($proc.ProcessName)) on port $p" -ForegroundColor Yellow
+      Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+      $stoppedCount++
+=======
         if ($proc) {
             Write-Host "  → Killing PID=$procId ($($proc.ProcessName)) on port $p" -ForegroundColor Yellow
             Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
             $killedCount++
         }
+main
     }
 }
 
+ copilot/fix-bn88-project-issues-again
+if ($stoppedCount -eq 0) {
+    Write-Host "No processes found on monitored ports." -ForegroundColor Gray
+} else {
+    Write-Host "Stopped $stoppedCount process(es)." -ForegroundColor Green
+}
+
+Write-Host "✓ Done." -ForegroundColor Green
+=======
 Write-Host ""
 if ($killedCount -eq 0) {
     Write-Host "No processes found on the specified ports." -ForegroundColor Gray
@@ -47,3 +70,4 @@ Write-Host ""
 Write-Host "===============================================" -ForegroundColor Green
 Write-Host "  All development servers stopped." -ForegroundColor Green
 Write-Host "===============================================" -ForegroundColor Green
+ main
