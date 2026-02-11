@@ -24,7 +24,6 @@ export async function resolveTodayRuleId(params: {
       tenant: params.tenant,
       botId: params.botId,
       dateKey,
-      isActive: true,
     },
     orderBy: { createdAt: "desc" },
     select: { id: true },
