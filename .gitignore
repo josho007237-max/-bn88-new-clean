@@ -1,11 +1,56 @@
+# Dependencies
 node_modules/
 dist/
 logs/
 *.log
+
+# Environment files
 .env
 .env.*
+!.env.example
+
+# Database files
 dev.db
 *.db
+*.db-journal
+*.db-shm
+*.db-wal
+prisma/dev.db*
+
+# IDE
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+out/
+.next/
+.nuxt/
+
+# Testing
+coverage/
+.nyc_output/
+
+# Cloudflare
 .wrangler/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Backup files
+backups/
+*.backup
+*.bak
+
+# Lock files (keep package-lock.json but ignore others)
+yarn.lock
+pnpm-lock.yaml
