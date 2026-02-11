@@ -154,9 +154,9 @@ app.use(
 app.use(
   express.json({
     limit: "1mb",
-    verify: (req, _res, buf) => {
+    verify: (req: any, _res, buf) => {
       if (req.originalUrl && req.originalUrl.startsWith("/api/webhooks/line")) {
-        (req as any).rawBody = buf;
+        req.rawBody = buf;
       }
     },
   }),

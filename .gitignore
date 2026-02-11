@@ -1,17 +1,46 @@
+ copilot/fix-and-improve-bn88-project
 # Dependencies
 node_modules/
 package-lock.json.bak
+=======
+copilot/fix-bn88-project-issues-again
+# Node.js
+# ===============================================
+# BN88 Project .gitignore
+# ===============================================
+# -----------------------------------------------
+# Dependencies
+# -----------------------------------------------
+main
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+copilot/fix-bn88-project-issues-again
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+ main
 
 # Build outputs
 dist/
 build/
+ copilot/fix-and-improve-bn88-project
 .vite/
 .next/
 out/
+=======
+out/
+.next/
+.nuxt/
+.cache/
+ main
 
 # Logs
 logs/
 *.log
+ copilot/fix-and-improve-bn88-project
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -31,10 +60,84 @@ dev.db
 
 # IDE
 .vscode/
+=======
+log/
+
+# Environment files - NEVER commit secrets!
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+
+# Database files
+
+lerna-debug.log*
+
+# -----------------------------------------------
+# Build Outputs
+# -----------------------------------------------
+dist/
+dist-ssr/
+build/
+*.local
+.output/
+.nuxt/
+.next/
+out/
+
+# -----------------------------------------------
+# Environment & Configuration
+# -----------------------------------------------
+.env
+.env.*
+!.env.example
+*.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# -----------------------------------------------
+# Logs
+# -----------------------------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.log.*
+
+# -----------------------------------------------
+# Databases
+# -----------------------------------------------
+main
+dev.db
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+copilot/fix-bn88-project-issues-again
+
+# IDE and Editor files
+.vscode/
+=======
+*.sqlite-journal
+
+# -----------------------------------------------
+# IDEs and Editors
+# -----------------------------------------------
+.vscode/
+!.vscode/extensions.json
+main
+main
 .idea/
 *.swp
 *.swo
 *~
+copilot/fix-and-improve-bn88-project
 
 # OS
 .DS_Store
@@ -73,3 +176,115 @@ coverage/
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
+=======
+ copilot/fix-bn88-project-issues-again
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Docker
+.wrangler/
+.wrangler-d1/
+
+# TypeScript
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.log
+=======
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# -----------------------------------------------
+# OS Files
+# -----------------------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# -----------------------------------------------
+# Cloudflare & Workers
+# -----------------------------------------------
+.wrangler/
+.dev.vars
+wrangler.toml
+worker-configuration.d.ts
+
+# -----------------------------------------------
+# Testing
+# -----------------------------------------------
+coverage/
+*.coverage
+.nyc_output/
+.cache/
+
+# -----------------------------------------------
+# Temporary Files
+# -----------------------------------------------
+tmp/
+temp/
+*.tmp
+.temp/
+
+# -----------------------------------------------
+# Security & Secrets
+# -----------------------------------------------
+*.pem
+*.key
+*.cert
+secrets/
+.secrets/
+
+# -----------------------------------------------
+# Prisma
+# -----------------------------------------------
+*.db-wal
+prisma/*.db
+prisma/*.db-journal
+prisma/migrations/*_backup/
+
+# -----------------------------------------------
+# Uploads & User Content
+# -----------------------------------------------
+uploads/
+upload/
+public/uploads/
+
+# -----------------------------------------------
+# Lock Files (optional - uncomment if needed)
+# -----------------------------------------------
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# -----------------------------------------------
+# Project Specific
+# -----------------------------------------------
+runlog.txt
+*.out
+tree_clean.txt
+main
+ main

@@ -1,177 +1,425 @@
-# RUNBOOK (Local) — BN88-new-clean
+# RUNBOOK-LOCAL - BN88 New Clean
 
-## Backend (bn88-backend-v12)
+Quick reference guide for local development. For detailed instructions, see [SETUP.md](SETUP.md).
+
+## 🚀 Quick Start
+
+### Start Everything
+
+```powershell
+# From repository root
+.\start-dev.ps1
+```
+
+Opens two PowerShell windows:
+- Backend on http://localhost:3000
+- Frontend on http://localhost:5555
+
+### Stop Everything
+
+```powershell
+.\stop-dev.ps1
+```
+
+### Run Tests
+
+```powershell
+.\smoke.ps1
+```
+
+## 🔧 Backend (bn88-backend-v12)
+
+### First-Time Setup
 
 ```powershell
 cd .\bn88-backend-v12
-npm i
-npx prisma migrate dev
+
+# Install dependencies
+npm install
+
+# Setup environment
+copy .env.example .env
+# Edit .env as needed
+
+# Initialize database
+npx prisma generate
+npx prisma db push
+
+# Seed data
+npm run seed:dev
+```
+
+### Daily Development
+
+```powershell
+cd .\bn88-backend-v12
+
+# Start development server
 npm run dev
+
+# In another terminal, run Prisma Studio
+npm run studio
+# Access at http://localhost:5556
 ```
 
-Health check:
+### Health Check
 
 ```powershell
-curl http://localhost:3000/health
-```
-
-## PowerShell: ห้ามใช้ $pid ให้ใช้ $procId
-
-- ใช้ตัวแปร `$procId` แทน `$pid` เพราะ `$PID` เป็นตัวแปรอัตโนมัติของ PowerShell
-
-## Redis (dev)
-
-1. Start a redis container bound to the port the backend expects (6380).
-
-```powershell
-docker run --rm -p 6380:6379 redis:8-alpine
-```
-
-2. Point the backend at that container before launching it:
-
-```powershell
-$env:REDIS_URL="redis://127.0.0.1:6380"
-npm run dev
-```
-
-3. Skip redis initialization/log spam when Redis is not running by setting `DISABLE_REDIS=1` (or `ENABLE_REDIS=0`).
-
-## Backup / Restore (dev)
-
-Backup SQLite + media manifest:
-
-```powershell
-pwsh -File .\bn88-backend-v12\scripts\backup-dev.ps1
-```
-
-Restore SQLite from a backup file:
-
-```powershell
-pwsh -File .\bn88-backend-v12\scripts\restore-dev.ps1 -BackupFile .\bn88-backend-v12\backups\db-<timestamp>.sqlite
-```
-
-## LINE webhook (HTTPS required)
-
-- LINE ต้องใช้ HTTPS เท่านั้น (ห้ามใช้ http:// หรือ localhost)
-- แนะนำใช้ tunnel:
-
-```powershell
-cloudflared tunnel --url http://localhost:3000
-```
-
-- ถ้าติดปัญหา ให้ลองบังคับ protocol:
-
-```powershell
-cloudflared tunnel --protocol http2 --url http://localhost:3000
-```
-
-- ต้องใช้ URL ล่าสุดที่ cloudflared แสดง (URL เก่าอาจ 404)
-- ตัวอย่าง webhook URL ที่ถูกต้อง:
-
-```
-https://<trycloudflare>/api/webhooks/line/bn9/dev-bot
-```
-
-## Troubleshooting: cloudflared quick tunnel เข้า URL ไม่ได้
-
-1. เช็ค origin (localhost)
-
-```powershell
-curl http://localhost:3000/
+# Test backend is running
 curl http://localhost:3000/api/health
+
+# Expected: {"ok":true,"time":"...","adminApi":true}
 ```
 
-2. เช็ค public (status code)
+### Database Commands
 
 ```powershell
-iwr https://<public>/ -Method GET | Select-Object -ExpandProperty StatusCode
-iwr https://<public>/api/health -Method GET | Select-Object -ExpandProperty StatusCode
+cd .\bn88-backend-v12
+
+# Push schema changes (dev only)
+npx prisma db push
+
+# Create migration
+npx prisma migrate dev --name your_migration_name
+
+# Open database GUI
+npm run studio
+
+# Reset database (⚠️ deletes data!)
+npx prisma migrate reset --force
+
+# Reseed database
+npm run seed:dev
 ```
 
-3. ถ้าไม่ผ่าน ให้บังคับ protocol เป็น http2
+## 🎨 Frontend (bn88-frontend-dashboard-v12)
 
-```powershell
-cloudflared tunnel --url http://localhost:3000 --protocol http2
-```
-
-4. ถ้ายังไม่ผ่าน ให้เปิด debug แล้วดู keyword:
-
-- origin connection refused
-- handshake
-- disconnect
-
-```powershell
-cloudflared tunnel --url http://localhost:3000 --protocol http2 --loglevel debug
-```
-
-## Checklist: trycloudflare ได้ 404 แต่ localhost ใช้งานได้ (Windows)
-
-1. เคลียร์ cloudflared ที่รันค้างทั้งหมด
-
-```powershell
-Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force
-```
-
-2. รัน cloudflared ใหม่ (http2 + debug)
-
-```powershell
-cloudflared tunnel --protocol http2 --url http://127.0.0.1:3000 --loglevel debug
-```
-
-3. เทส public ด้วย iwr (ดู StatusCode + headers)
-
-```powershell
-$r = iwr "https://<trycloudflare>/" -SkipHttpErrorCheck
-$r.StatusCode
-$r.Headers["server"]
-$r.Headers["cf-ray"]
-```
-
-4. เงื่อนไขตัดสิน
-
-- ถ้า backend ไม่มี log เมื่อยิง public => request ไม่ถึง origin
-
-## Dashboard (bn88-frontend-dashboard-v12)
+### First-Time Setup
 
 ```powershell
 cd .\bn88-frontend-dashboard-v12
-npm i
-npm run dev
+
+# Install dependencies
+npm install
+
+# Setup environment
+copy .env.example .env
+# Defaults are usually fine
 ```
 
-URL:
-
-```
-http://localhost:5173
-```
-
-## Ports
-
-- 3000 (backend)
-- 6380 (redis) — set `REDIS_URL=redis://127.0.0.1:6380` or `REDIS_PORT=6380` to enable workers
-- 5555 (prisma studio, if used)
-
-## Quick checks
+### Daily Development
 
 ```powershell
-netstat -ano | findstr ":3000"
-netstat -ano | findstr ":6380"
-netstat -ano | findstr ":5555"
+cd .\bn88-frontend-dashboard-v12
 
+# Start development server
+npm run dev
+
+# Access at http://localhost:5555
+```
+
+### Build & Test
+
+```powershell
+cd .\bn88-frontend-dashboard-v12
+
+# Type check
+npm run typecheck
+
+# Lint
+npm run lint
+
+# Build for production
+npm run build
+
+# Preview build
+npm run preview
+```
+
+## 💾 Database Options
+
+### Option A: SQLite (Quickest)
+
+```powershell
+# In bn88-backend-v12/.env
+DATABASE_URL=file:./prisma/dev.db
+
+# Initialize
+npx prisma db push
+```
+
+✅ No Docker needed
+✅ Fast setup
+⚠️ Single-file database
+⚠️ No concurrent writes
+
+### Option B: PostgreSQL with Docker (Recommended)
+
+```powershell
+# Start PostgreSQL
+docker-compose up -d db
+
+# In bn88-backend-v12/.env
+DATABASE_URL=postgresql://admin:password@localhost:5432/bn88?schema=public
+
+# Initialize
+npx prisma db push
+```
+
+✅ Production-like environment
+✅ Better performance
+✅ Concurrent access
+⚠️ Requires Docker
+
+### Option C: Your Own PostgreSQL
+
+```powershell
+# In bn88-backend-v12/.env
+DATABASE_URL=postgresql://YOUR_USER:YOUR_PASSWORD@YOUR_HOST:5432/bn88?schema=public
+
+# Initialize
+npx prisma db push
+```
+
+## 📦 Redis (Optional)
+
+### Start Redis
+
+```powershell
+# With docker-compose (port 6380)
+docker-compose up -d redis
+
+# Or standalone (standard port 6379)
+docker run --rm -p 6380:6379 redis:7-alpine
+```
+
+### Configure Backend
+
+```powershell
+# In bn88-backend-v12/.env
+REDIS_URL=redis://127.0.0.1:6380
+REDIS_PORT=6380
+ENABLE_REDIS=1
+```
+
+### Disable Redis
+
+```powershell
+# In bn88-backend-v12/.env
+DISABLE_REDIS=1
+```
+
+### Test Redis
+
+```powershell
+# Using redis-cli
+redis-cli -p 6380 ping
+# Expected: PONG
+
+# Or check health endpoint
+curl http://localhost:3000/api/health/redis
+```
+
+## 🔑 Default Login
+
+```
+Email:    root@bn9.local
+Password: bn9@12345
+Tenant:   bn9
+```
+
+## 🌐 Ports
+
+| Service | Port | URL |
+|---------|------|-----|
+| Backend | 3000 | http://localhost:3000 |
+| Frontend | 5555 | http://localhost:5555 |
+| Prisma Studio | 5556 | http://localhost:5556 |
+| Redis | 6380 | redis://localhost:6380 |
+| PostgreSQL | 5432 | postgresql://localhost:5432 |
+| LINE Platform | 8080 | http://localhost:8080 |
+
+## 🔍 Port Checks
+
+```powershell
+# Check what's using ports
+netstat -ano | findstr ":3000"
+netstat -ano | findstr ":5555"
+netstat -ano | findstr ":6380"
+
+# Or with PowerShell
+Get-NetTCPConnection -LocalPort 3000 -State Listen
+Get-NetTCPConnection -LocalPort 5555 -State Listen
+Get-NetTCPConnection -LocalPort 6380 -State Listen
+```
+
+## 🐛 Common Issues
+
+### Port Already in Use
+
+```powershell
+# Stop all dev services
+.\stop-dev.ps1
+
+# Or kill specific port
+Get-NetTCPConnection -LocalPort 3000 -State Listen | 
+  ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+```
+
+### "Cannot find module"
+
+```powershell
+# Clean reinstall
+cd bn88-backend-v12
+rm -r node_modules
+npm install
+
+# Or
+npm ci
+```
+
+### "Prisma Client not initialized"
+
+```powershell
+cd bn88-backend-v12
+npx prisma generate
+```
+
+### Database connection failed
+
+```powershell
+# Check DATABASE_URL in .env
+# If using Docker:
+docker-compose up -d db
+
+# Test connection:
+npx prisma db push
+```
+
+### Frontend can't reach backend
+
+1. Check backend is running: http://localhost:3000/api/health
+2. Check proxy config: `vite.config.ts`
+3. Check CORS: `ALLOWED_ORIGINS` in backend `.env`
+4. Clear browser cache/cookies
+
+## 🌍 LINE Webhook (HTTPS Required)
+
+LINE webhooks require HTTPS. Use Cloudflare Tunnel for local development:
+
+```powershell
+# Install cloudflared first (one-time)
+# Download from: https://github.com/cloudflare/cloudflared/releases
+
+# Basic tunnel
+cloudflared tunnel --url http://localhost:3000
+
+# With HTTP/2 (recommended)
+cloudflared tunnel --protocol http2 --url http://localhost:3000
+
+# With debug logs
+cloudflared tunnel --protocol http2 --url http://localhost:3000 --loglevel debug
+```
+
+**Webhook URL format:**
+```
+https://<tunnel-url>/api/webhooks/line/bn9/dev-bot
+```
+
+**Test tunnel:**
+```powershell
+# Local endpoint
+curl http://localhost:3000/api/health
+
+# Tunnel endpoint  
+curl https://<tunnel-url>/api/health
+```
+
+### Troubleshoot Tunnel 404
+
+```powershell
+# 1. Kill old tunnels
+Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force
+
+# 2. Start fresh
+cloudflared tunnel --protocol http2 --url http://127.0.0.1:3000 --loglevel debug
+
+# 3. Test with details
+$r = Invoke-WebRequest "https://<tunnel-url>/api/health" -SkipHttpErrorCheck
+$r.StatusCode
+$r.Headers
+```
+
+## 📝 Useful Commands
+
+### Git
+
+```powershell
+# Check status
 git status -sb
 
-cd .\bn88-backend-v12
-npx prisma validate
+# View changes
+git diff
+
+# Discard changes
+git checkout -- .
 ```
 
-## Safe config search (Windows + rg)
-
-บางเครื่อง/PowerShell จะ error เมื่อใช้ regex มี `|`. ให้แยกค้นทีละคำ:
+### Prisma
 
 ```powershell
-rg -n "REDIS_URL" bn88-backend-v12
-rg -n "REDIS_PORT" bn88-backend-v12
-rg -n "redis://127.0.0.1" bn88-backend-v12
-rg -n "DISABLE_REDIS" bn88-backend-v12
-rg -n "ENABLE_REDIS" bn88-backend-v12
+cd bn88-backend-v12
+
+# Validate schema
+npx prisma validate
+
+# Format schema
+npx prisma format
+
+# View schema in GUI
+npm run studio
 ```
+
+### Process Management
+
+```powershell
+# List all node processes
+Get-Process node
+
+# Kill all node processes (⚠️ careful!)
+Get-Process node | Stop-Process -Force
+
+# Find process by port
+Get-NetTCPConnection -LocalPort 3000 | 
+  Select-Object -ExpandProperty OwningProcess
+```
+
+## 🔒 PowerShell Best Practice
+
+⚠️ **Important:** Always use `$procId` instead of `$pid`
+
+```powershell
+# ✅ CORRECT
+$procId = $connection.OwningProcess
+Stop-Process -Id $procId -Force
+
+# ❌ WRONG - $PID is reserved in PowerShell
+$pid = $connection.OwningProcess
+Stop-Process -Id $pid -Force
+```
+
+`$PID` is a PowerShell automatic variable (current PowerShell process ID).
+
+## 📚 More Information
+
+- [SETUP.md](SETUP.md) - Detailed setup guide
+- [README.md](README.md) - Project overview  
+- [RUNBOOK.md](RUNBOOK.md) - Full operational guide
+- [CONTRIBUTING.md](CONTRIBUTING.md) - How to contribute
+
+## 🆘 Need Help?
+
+1. Run smoke tests: `.\smoke.ps1`
+2. Check [SETUP.md](SETUP.md) troubleshooting section
+3. Review application logs
+4. Check [GitHub Issues](https://github.com/josho007237-max/-bn88-new-clean/issues)

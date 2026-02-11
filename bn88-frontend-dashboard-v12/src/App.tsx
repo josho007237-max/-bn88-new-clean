@@ -2,7 +2,6 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useCallback } from "react";
 import { clearToken } from "./lib/api";
-import ImageSamplesPage from "./pages/ImageSamples";
 
 export default function App() {
   const nav = useNavigate();
