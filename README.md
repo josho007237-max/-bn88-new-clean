@@ -23,7 +23,7 @@ A full-stack LINE messaging platform with admin dashboard, built with Express, R
 1. **Clone the repository**
    ```bash
    git clone <repo-url>
-   cd -bn88-new-clean
+   cd ./-bn88-new-clean
    ```
 
 2. **Setup Backend**

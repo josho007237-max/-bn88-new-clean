@@ -17,7 +17,7 @@ Thank you for your interest in contributing to the BN88 platform! This document 
 2. **Clone your fork**
    ```bash
    git clone <your-fork-url>
-   cd -bn88-new-clean
+   cd ./-bn88-new-clean
    ```
 
 3. **Set up development environment**
