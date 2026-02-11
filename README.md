@@ -394,11 +394,14 @@ npm run preview              # Preview production build
 
 ## 📚 Documentation
 
-- **[README.md](./README.md)** - This file (overview and quick start)
+- **[QUICKSTART.md](./QUICKSTART.md)** - 5-minute setup guide (start here!)
+- **[README.md](./README.md)** - This file (overview and setup)
 - **[RUNBOOK.md](./RUNBOOK.md)** - Operational procedures and commands
 - **[RUNBOOK-LOCAL.md](./RUNBOOK-LOCAL.md)** - Local development guide
 - **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** - Common issues and solutions
 - **[CONTRIBUTING.md](./CONTRIBUTING.md)** - How to contribute
+- **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Production deployment guide
+- **[CHANGELOG.md](./CHANGELOG.md)** - Version history and changes
 - **[bn88-backend-v12/README.md](./bn88-backend-v12/README.md)** - Backend-specific docs
 - **[line-engagement-platform/README.md](./line-engagement-platform/README.md)** - LINE platform docs
 
