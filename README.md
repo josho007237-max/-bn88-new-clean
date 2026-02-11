@@ -237,22 +237,44 @@ npm run dev
 
 ### Docker Compose (Full Stack)
 
+For a complete production-like environment with PostgreSQL and Redis:
+
 ```powershell
-# Start all services (backend, frontend, databases, redis)
+# 1. Create root .env file
+Copy-Item .env.example .env
+
+# 2. Ensure backend and frontend .env files exist
+Copy-Item .\bn88-backend-v12\.env.example .\bn88-backend-v12\.env
+Copy-Item .\bn88-frontend-dashboard-v12\.env.example .\bn88-frontend-dashboard-v12\.env
+
+# 3. Update DATABASE_URL in backend .env for PostgreSQL
+# DATABASE_URL=postgresql://admin:password@db:5432/bn88?schema=public
+
+# 4. Start all services
 docker-compose up -d
 
-# View logs
+# 5. View logs
 docker-compose logs -f
 
-# Stop all services
+# 6. Stop all services
 docker-compose down
 ```
+
+**Services started:**
+- PostgreSQL (port 5432)
+- Redis (port 6380)
+- Backend (port 3000)
+- Frontend (port 5555)
+- LINE Platform (port 8080)
 
 ### Stop Services
 
 ```powershell
 # Stop all development services
 .\stop-dev.ps1
+
+# Or stop Docker Compose
+docker-compose down
 ```
 
 ## 🔧 Environment Configuration
